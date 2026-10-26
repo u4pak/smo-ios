@@ -5,6 +5,7 @@
 #include "dm.h"
 #include "odyssey_display.h"
 #include "odyssey_display_hud.h"
+#include "odyssey_ui.h"
 #include <math.h>
 #include <stdatomic.h>
 
@@ -426,6 +427,44 @@ static int hud_cursor_plan(void *layout, hud_map_edits *plan) {
     return cursor && hud_map_add(plan, cursor, 0x30, (hud_float(cursor, 0x30) - tx) / sx) &&
         hud_map_add(plan, cursor, 0x34, (hud_float(cursor, 0x34) - ty) / sy);
 }
+// The owner and root of a primary screen layout, for the UI observer.
+static uint8_t *hud_owner_root(void *layout, char owner[64]) {
+    if (!hud_aligned(layout) || hud_pointer(layout, 0) != hud_layout_vptr) return NULL;
+    uint8_t *screen = (uint8_t *)hud_pointer(layout, 0x88);
+    if (!hud_aligned(screen) || hud_pointer(screen, 0) != hud_screen_vptr ||
+        hud_pointer(screen, 0x30) != (uintptr_t)layout ||
+        !hud_owner_name((const char *)hud_pointer(screen, 0xb8), owner)) return NULL;
+    uint8_t *root = (uint8_t *)hud_pointer(layout, 0x18);
+    if (!hud_pane_valid(root) || hud_pointer(root, 0x18) || !hud_name(root, "RootPane") ||
+        (hud_pointer(root, 0) != hud_pane_vptr && hud_pointer(root, 0) != hud_root_vptr)) return NULL;
+    return root;
+}
+// Controller guides (hle_odyssey_ui.c): a ParFooter part under All (or the
+// root) sits the footer drop lower, and the button icon of a dialogue or
+// confirmation window (ParHardKey) shrinks with it, while touch is in use.
+static int hud_footer_plan(uint8_t *root, const char *owner, hud_map_edits *plan) {
+    float drop = dm_odyssey_ui_footer_drop();
+    if (!root || !(drop > 0)) return 0;
+    uint8_t *all = hud_child(root, "All"), *footer = all ? hud_child(all, "ParFooter") : NULL;
+    if (!footer) footer = hud_child(root, "ParFooter");
+    int planned = footer && hud_map_add(plan, footer, 0x34, hud_float(footer, 0x34) - drop);
+    const char *holder = !strncmp(owner, "TalkMessage", 11) ? "Message" : !strncmp(owner, "WindowConfirm", 13) ? "Window" : NULL;
+    uint8_t *box = holder && all ? hud_child(all, holder) : NULL, *key = box ? hud_child(box, "ParHardKey") : NULL;
+    if (!key && all && (!strcmp(owner, "ImportantMessage") || !strcmp(owner, "WindowInfo"))) {   // directly under All, or one pane down
+        key = hud_child(all, "ParHardKey");
+        uintptr_t sentinel = (uintptr_t)all + 0x20, node = hud_pointer(all, 0x28);
+        for (unsigned i = 0; !key && node != sentinel && i < 64 && node >= 8 && !(node & 7); i++) {
+            uint8_t *sub = (uint8_t *)(node - 8);
+            if (!hud_pane_valid(sub)) break;
+            key = hud_child(sub, "ParHardKey");
+            node = hud_pointer(sub, 0x10);
+        }
+    }
+    float keep = fmaxf(0, 1 - drop / DM_UI_FOOTER_DROP);
+    if (key && hud_map_add(plan, key, 0x48, hud_float(key, 0x48) * keep) && hud_map_add(plan, key, 0x4c, hud_float(key, 0x4c) * keep))
+        planned = 1;
+    return planned;
+}
 static void hud_calculate(void *layout, void *draw_info, int recursive) {
     pthread_mutex_lock(&hud_stats_lock); ++hud_stats.calls; pthread_mutex_unlock(&hud_stats_lock);
     if (hud_depth) {
@@ -457,7 +496,15 @@ static void hud_calculate(void *layout, void *draw_info, int recursive) {
         hud_map_apply(&cursor, 0);
         pthread_mutex_lock(&hud_stats_lock); ++hud_stats.menu_cursors; pthread_mutex_unlock(&hud_stats_lock);
     }
+    char owner[64];
+    uint8_t *root = hud_owner_root(layout, owner);
+    hud_map_edits footer = {0};
+    int footed = root && hud_footer_plan(root, owner, &footer);
+    if (footed) hud_map_apply(&footer, 0);
     hud_original(layout, draw_info, recursive);
+    // Read back while the rendered edits are still in place.
+    if (root) dm_odyssey_ui_observe(owner, root);
+    if (footed) hud_map_apply(&footer, 1);
     if (cursored) hud_map_apply(&cursor, 1);
     if (result == 1) hud_apply(&plan, 1);
     if (mapped == 1) hud_map_apply(&map, 1);

@@ -540,6 +540,8 @@ HLE_FORCE("_ZN5movie7Decoder5FlushEv", "movie decoder flush: all inputs and outp
     mdec_t *d = md_of(self); if (!d) return 0x1000;
     MD_TRACE(d, 5, "Flush"); md_defer_drop(d); md_reset(d, 0);
     if (d->vb) { pthread_mutex_lock(&d->dmu); stb_vorbis_flush_pushdata(d->vb); pthread_mutex_unlock(&d->dmu); }   // a seek: start the overlap afresh
+    // AAC: a seek also drops the decoder's buffered frames and priming state, as FFmpeg's AudioToolbox decoder does on flush
+    if (d->aac) { pthread_mutex_lock(&d->dmu); AudioConverterReset(d->aac); pthread_mutex_unlock(&d->dmu); }
     return 0;
 }
 HLE_FORCE("_ZN5movie7Decoder23AcquireInputBufferIndexEPiS1_", "movie decoder: acquire a free input index", int, h_movie_AcqIn, void **self, int *idx, int *left) {

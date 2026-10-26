@@ -68,6 +68,8 @@ FULL_FRAME_PANES = {
     'WindowConfirmWait': {'PicCaptureUse'},
     'WindowConfirmWaitBlack': {'PicBG'},
     'WindowInfo': {'PicCaptureUse'},
+    # The still frame before the kingdom select is a live capture: it fills the panel exactly.
+    'WipeWorldSelectCapture': {'PicCaptureUse'},
     **{name: {'PicCaptureUse00', 'PicCaptureUse01', 'PicBG00', 'PicBG01'}
        for name in ('OptionConfig', 'OptionData', 'OptionLanguage', 'OptionMode', 'OptionProcess', 'OptionSelect')},
 }

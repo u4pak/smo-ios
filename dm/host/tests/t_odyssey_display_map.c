@@ -11,6 +11,9 @@ void dm_odyssey_display_layout_snapshot(dm_odyssey_display_layout *out) {
     memset(out, 0, sizeof *out); out->aspect = requested_aspect;
 }
 void dm_odyssey_display_hud_ready(void) { ++ready; }
+static float footer_drop;
+float dm_odyssey_ui_footer_drop(void) { return footer_drop; }
+void dm_odyssey_ui_observe(const char *owner, uint8_t *root) { (void)owner; (void)root; }
 
 static void put_pointer(uint8_t *p, size_t offset, const void *value) {
     uintptr_t word = (uintptr_t)value; memcpy(p + offset, &word, sizeof word);
@@ -158,10 +161,17 @@ int main(void) {
     objects("Shop", 0, 0, 1, 1);
     child(root, all_pane, "All", 0, 0); child(all_pane, cursor_pane, "ParCursor", -560, 54);
     check_cursor = 1; calculate();
+    // Button guides: ParFooter under All renders the footer drop lower, then is restored.
+    footer_drop = 30;
+    objects("MenuGuide", 0, 0, phone ? .817696f : 1, phone ? 1 : .75f);
+    child(root, all_pane, "All", 0, 0); child(all_pane, cursor_pane, "ParFooter", 0, -360);
+    check_cursor = 1; expect_cursor_x = 0; expect_cursor_y = -390; calculate();
+    assert(hud_float(cursor_pane, 0x34) == -360);
+    footer_drop = 0; check_cursor = 1; expect_cursor_y = -360; calculate();
     dm_odyssey_display_hud_stats stats; dm_odyssey_display_hud_snapshot(&stats);
     assert(stats.map_icons == (phone ? 4u : 7u) && stats.map_roots == (phone ? 1u : 2u));
     assert(stats.menu_cursors == (phone ? 1u : 2u));
-    printf("PASS: map-screen rule (%s): icon roots follow Map's root, player scale ratio, other owners untouched, menu cursors in root units, exact restore\n",
+    printf("PASS: map-screen rule (%s): icon roots follow Map's root, player scale ratio, other owners untouched, menu cursors in root units, footer slide, exact restore\n",
            phone ? "phone" : "4:3");
     return 0;
 }

@@ -11,6 +11,12 @@ void dm_odyssey_display_layout_snapshot(dm_odyssey_display_layout *out) {
     *out = layout_geometry; out->aspect = requested_aspect;
 }
 void dm_odyssey_display_hud_ready(void) { ++ready; }
+float dm_odyssey_ui_footer_drop(void) { return 0; }
+static unsigned observed, observed_bad; // The UI observer sees each primary layout once, after Calculate.
+void dm_odyssey_ui_observe(const char *owner, uint8_t *root) {
+    ++observed;
+    if (!owner || !*owner || !root || !hud_name(root, "RootPane") || hud_pointer(root, 0x18)) ++observed_bad;
+}
 
 static void put_pointer(uint8_t *p, size_t offset, const void *value) {
     uintptr_t word = (uintptr_t)value; memcpy(p + offset, &word, sizeof word);
@@ -218,6 +224,7 @@ int main(void) {
     memcpy(before_root,root,sizeof root); calculate(); assert(!memcmp(before_root,root,0x70)); enabled = 1;
     dm_odyssey_display_hud_stats result; dm_odyssey_display_hud_snapshot(&result);
     assert(result.adapted == 1008 && result.declined == 16 && result.skipped == 1 && result.nested == 1 && result.disabled == 1);
+    assert(observed > 0 && !observed_bad);
     puts("PASS: actual HUD adapter exact guards, 1000 folds, animated locals, edge/fill/parts, baked matrices, nested restore, safe-area edges/fullbleed and all-or-none declines");
     return 0;
 }

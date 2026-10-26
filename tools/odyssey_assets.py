@@ -10,6 +10,7 @@ import tempfile
 from odyssey_displays import resolve
 import prepare_odyssey_aspect as pad
 import prepare_odyssey_balloon as balloon
+import prepare_odyssey_glyphs as glyphs
 import prepare_odyssey_phone as phone
 
 TITLE = '0100000000010000'
@@ -19,7 +20,7 @@ MODULES = {
     'sdk': '754cf4b581d749fbe3d457cf66497b141ef994cf592d247919d64a37dcc30d27',
 }
 REWRITTEN = {
-    'main': '1ca4daaffc598ed3859fb6c6183ed07be8a7836cff86733f3122bc7005f013ee',
+    'main': '603de27b25992502efa3d5d32fdb8789a68c00b621072fd711d601fe9a841072',
     'subsdk0': 'bc8cdf523557dce3789f2ba890998bf825e7ff102ea91fb1fd76d0f0f7c5db43',
     'sdk': 'f1f137f007d11574416e0262f42029ea31fc8656c44b56883a6abb08eae68875',
 }
@@ -101,10 +102,14 @@ def prepare_assets(repo: Path, extracted: Path, rewritten: Path, output: Path, p
         expected = 210 if display.live else 211
         if len(receipt['archives']) != expected:
             raise ValueError(f'Expected exactly {expected} corrected layout archives')
-        # Every preset: Luigi says Balloon World (online only) is unsupported.
+        # Every preset: Luigi says Balloon World (online only) is unsupported; the
+        # same message pass names the Pro Controller "Controller / Device" (English)
+        # and points touch pictures (the moped's pedal and arrow) at their glyphs.
         unsupported = balloon.prepare(extracted / 'RomFS', overlay)
-        if {a['relative_path'] for a in unsupported} & {a['relative_path'] for a in receipt['archives']}:
-            raise ValueError('Balloon World archives overlap the corrected layout archives')
+        pictures = glyphs.prepare(extracted / 'RomFS', overlay)
+        paths = [{a['relative_path'] for a in group} for group in (receipt['archives'], unsupported, pictures)]
+        if paths[0] & paths[1] or paths[0] & paths[2] or paths[1] & paths[2]:
+            raise ValueError('Message, font and corrected layout archives overlap')
         # APFS clones are copy-on-write; fall back to ordinary independent copies.
         romfs = stage / 'RomFS'
         cp = subprocess.run(['cp', '-cR', str(extracted / 'RomFS'), str(romfs)], capture_output=True)
@@ -112,7 +117,7 @@ def prepare_assets(repo: Path, extracted: Path, rewritten: Path, output: Path, p
             if romfs.exists():
                 shutil.rmtree(romfs)
             shutil.copytree(extracted / 'RomFS', romfs)
-        for archive in receipt['archives'] + unsupported:
+        for archive in receipt['archives'] + unsupported + pictures:
             relative = archive['relative_path']
             original = extracted / 'RomFS' / relative
             target = romfs / relative
@@ -121,7 +126,7 @@ def prepare_assets(repo: Path, extracted: Path, rewritten: Path, output: Path, p
                 raise ValueError(f'Source/output integrity mismatch: {relative}')
         record = {'preset': display.preset, 'model': display.model, 'aspect': display.ratio, 'live_display': display.live,
                   'main_build_id': pad.BUILD_ID, 'modules_sha256': MODULES,
-                  'camera': camera, 'layouts': receipt, 'balloon_world_unsupported': unsupported,
+                  'camera': camera, 'layouts': receipt, 'balloon_world_unsupported': unsupported, 'touch_pictures': pictures,
                   'patched': str(patched), 'romfs': str(romfs)}
         # Replace staging prefixes only in our local receipt; original paths stay intact.
         record = json.loads(json.dumps(record).replace(str(stage), str(output)))

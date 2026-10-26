@@ -12,6 +12,34 @@ import prepare_odyssey_balloon as balloon
 import prepare_odyssey_phone as phone
 
 VOICE = struct.pack('<4H', 0x0E, 4, 0, 16) + struct.pack('<H', 14) + 'Talk025'.encode('utf-16-le')
+PAD = struct.pack('<4H', 0x0E, 9, 40, 4) + bytes.fromhex('00002ce1') + ' Pro Controller'.encode('utf-16-le') + b'\0\0'
+HANDHELD = struct.pack('<4H', 0x0E, 9, 41, 4) + bytes.fromhex('00002ce1') + ' Handheld'.encode('utf-16-le') + b'\0\0'
+JOYCON = struct.pack('<4H', 0x0E, 9, 37, 4) + bytes.fromhex('000022e1') + ' Joy-Con'.encode('utf-16-le') + b'\0\0'
+
+
+def pad_picture(kind: int, button: str, handheld: str = '') -> bytes:
+    names = [p + button for p in ('Dual', 'Handheld', 'FullKey', 'Left', 'Right')]
+    names[1] = handheld or names[1]
+    body = b''.join(struct.pack('<H', 2 * len(n)) + n.encode('utf-16-le') for n in names)
+    return struct.pack('<4H', 0x0E, 6, kind, len(body)) + body
+
+
+MOPED = pad_picture(5, 'ButtonY') + ' Accelerate   '.encode('utf-16-le') + pad_picture(3, 'ButtonB') + ' Jump'.encode('utf-16-le') + b'\0\0'
+
+
+def pad_pair(kind: int, names) -> bytes:
+    body = b''.join(struct.pack('<H', 2 * len(n)) + n.encode('utf-16-le') for n in names)
+    return struct.pack('<4H', 0x0E, 6, kind, len(body)) + body
+
+
+SKIP = pad_pair(29, ['MenuButton', 'MenuPlayerL', 'MenuPlayerR']) + ' Skip'.encode('utf-16-le') + b'\0\0'
+PLUS_LEFT = struct.pack('<4H', 0x0E, 9, 19, 4) + bytes.fromhex('0000f0e0') + b'\0\0'
+
+
+def pad_style(full_key: bytes) -> bytes:
+    labels = [('LeftButtonPlus', PLUS_LEFT), ('FullKeyJoyCon', full_key), ('FullKeyJoyConR', full_key), ('FullKeyJoyConIconOnly', full_key[:12] + b'\0\0'),
+              ('HandheldJoyCon', JOYCON), ('HandheldJoyConR', JOYCON), ('HandheldJoyConIconOnly', JOYCON[:12] + b'\0\0'), ('Handheld', HANDHELD)]
+    return msbt(labels)
 
 
 def byml(root) -> bytes:
@@ -183,6 +211,23 @@ class BalloonWorldTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'voice tag'):
             balloon.replace_message(msbt([('TimeBalloon_Separate', other)]), 'TimeBalloon_Separate', balloon.MESSAGE)
 
+    def test_text_replacement_keeps_tags(self):
+        after = strings(balloon.replace_text(msbt([('FullKeyJoyCon', PAD)]), 'FullKeyJoyCon', *balloon.DEVICE))
+        self.assertEqual(after['FullKeyJoyCon'], PAD[:12] + ' Controller / Device'.encode('utf-16-le') + b'\0\0')
+        with self.assertRaisesRegex(ValueError, 'expected one'):
+            balloon.replace_text(msbt([('Handheld', HANDHELD)]), 'Handheld', *balloon.DEVICE)
+
+    def test_moped_names_the_touch_pictures_and_rejects_surprises(self):
+        after = strings(balloon._moped(msbt([('Motorcycle', MOPED)])))['Motorcycle']
+        expected = pad_picture(5, 'ButtonY', 'LeftButtonL') + ' Accelerate   '.encode('utf-16-le') \
+            + pad_picture(3, 'ButtonB', 'LeftButtonR') + ' Jump'.encode('utf-16-le') + b'\0\0'
+        self.assertEqual(after, expected)   # only the handheld names (and the tag sizes) change
+        self.assertEqual([(g, k) for _, g, k, _ in balloon._tags(after, '<')], [(6, 5), (6, 3)])
+        with self.assertRaisesRegex(ValueError, 'pad picture'):
+            balloon._moped(msbt([('Motorcycle', pad_picture(5, 'ButtonY') + b'\0\0')]))
+        with self.assertRaisesRegex(ValueError, 'unexpected pad picture names'):
+            balloon._moped(msbt([('Motorcycle', pad_picture(5, 'ButtonX') + pad_picture(3, 'ButtonB') + b'\0\0')]))
+
     def test_repack_keeps_other_members_and_their_alignment(self):
         members = [('a.msbt', b'A' * 0x40), ('TimeBalloon.msbt', b'B' * 0x40), ('c.msbt', b'C' * 0x40), ('d.msbt', b'D' * 0x30)]
         before = sarc(members)
@@ -204,23 +249,48 @@ class BalloonWorldTests(unittest.TestCase):
             (romfs / 'EventData').mkdir(parents=True)
             (romfs / 'EventData/BalloonGame.szs').write_bytes(yaz0(sarc([('NpcStandby.byml', flow())])))
             separate = VOICE + 'Sorry'.encode('utf-16-le') + b'\0\0'
-            languages = [f'L{i:02d}' for i in range(balloon.LANGUAGES)]
+            languages = ['USen', 'EUen'] + [f'L{i:02d}' for i in range(balloon.LANGUAGES - 2)]
             for language in languages:
                 path = romfs / 'LocalizedData' / language / 'MessageData'
                 path.mkdir(parents=True)
-                (path / 'SystemMessage.szs').write_bytes(yaz0(sarc([
-                    ('Other.msbt', b'O' * 0x20), ('TimeBalloon.msbt', msbt([('TimeBalloon_Separate', separate)]))])))
+                members = [('Other.msbt', b'O' * 0x20), ('TimeBalloon.msbt', msbt([('TimeBalloon_Separate', separate)])),
+                           ('PadStyle.msbt', pad_style(PAD)), ('Tutorial.msbt', msbt([('Motorcycle', MOPED), ('Killer', MOPED)]))]
+                if language in balloon.DEVICE_LANGUAGES:
+                    members += [('GlossarySystem.msbt', msbt([('JoyCon_R_00', 'Pro Controller'.encode('utf-16-le') + b'\0\0')])),
+                                ('PlayGuideSkip.msbt', msbt([('PlayGuideDemoSkip', SKIP)]))]
+                (path / 'SystemMessage.szs').write_bytes(yaz0(sarc(members)))
             sources = {p: p.read_bytes() for p in romfs.rglob('*.szs')}
             records = balloon.prepare(romfs, overlay)
             self.assertEqual(len(records), 1 + balloon.LANGUAGES)
             self.assertEqual({p: p.read_bytes() for p in romfs.rglob('*.szs')}, sources)  # inputs untouched
+            renamed = PAD[:8 + 4] + ' Controller / Device'.encode('utf-16-le') + b'\0\0'
             for record in records:
                 output = common.yaz0_decode((overlay / record['relative_path']).read_bytes())
                 self.assertEqual(common.sha((overlay / record['relative_path']).read_bytes()), record['output_sha256'])
                 body = {name: output[lo:hi] for name, lo, hi in phone.members(output, 'out')}
-                if record['member'] == 'TimeBalloon.msbt':
+                if 'TimeBalloon.msbt' in record['members']:
                     self.assertTrue(strings(body['TimeBalloon.msbt'])['TimeBalloon_Separate'].startswith(VOICE + 'Hey, Bro!'.encode('utf-16-le')))
                     self.assertEqual(body['Other.msbt'], b'O' * 0x20)
+                if 'PadStyle.msbt' in record['members']:
+                    pads, english = strings(body['PadStyle.msbt']), 'GlossarySystem.msbt' in record['members']
+                    name = renamed if english else PAD
+                    self.assertEqual((pads['FullKeyJoyCon'], pads['FullKeyJoyConR'], pads['Handheld']), (name, name, HANDHELD))
+                    self.assertEqual((pads['HandheldJoyCon'], pads['HandheldJoyConR'], pads['HandheldJoyConIconOnly']), (name, name, PAD[:12] + b'\0\0'))
+                    if english:
+                        self.assertEqual(strings(body['GlossarySystem.msbt'])['JoyCon_R_00'], 'Controller / Device'.encode('utf-16-le') + b'\0\0')
+                        self.assertEqual(pads['LeftButtonPlus'], 'Tap anywhere to'.encode('utf-16-le') + b'\0\0')
+                        skip = strings(body['PlayGuideSkip.msbt'])['PlayGuideDemoSkip']
+                        self.assertEqual(skip, pad_pair(11, ['DualButtonPlus', 'LeftButtonPlus', 'FullKeyButtonPlus', 'LeftButtonPlus',
+                                                             'RightButtonPlus']) + ' Skip'.encode('utf-16-le') + b'\0\0')
+                    else:
+                        self.assertEqual(pads['LeftButtonPlus'], PLUS_LEFT)
+                    tutorial = strings(body['Tutorial.msbt'])
+                    self.assertEqual(tutorial['Killer'], MOPED)
+                    moped = tutorial['Motorcycle'].decode('utf-16-le', 'replace')
+                    self.assertIn('LeftButtonL', moped); self.assertIn('LeftButtonR', moped); self.assertNotIn('HandheldButton', moped)
+                    self.assertTrue(moped.endswith(' Jump\0'))
+            self.assertEqual(sum('GlossarySystem.msbt' in r['members'] for r in records), 2)
+            self.assertEqual(sum('Tutorial.msbt' in r['members'] for r in records), balloon.LANGUAGES)
             (romfs / 'LocalizedData' / languages[0] / 'MessageData/SystemMessage.szs').unlink()
             with self.assertRaisesRegex(ValueError, 'SystemMessage'):
                 balloon.prepare(romfs, Path(temp) / 'overlay2')

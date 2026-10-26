@@ -220,12 +220,59 @@ OBS = {
   'b424be150a8e7d78701cbe7a439d9ebf': [
     (0x73de9c, 21, '1e2c1008', 'live projection after setFovy; x19 is al::Projection'),
     (0x73da10, 22, 'a9be4ff4', 'al::Projection calcMtx entry; full typed AL object in x0'),
+    # Touch camera: the follow camera's yaw step (+0x1ec) gains the swipe at the entry of its apply function (x0 = CameraPoserFollowLimit)
+    # and loses it again after the last call, before the yaw store (x19), so it is applied once and the game's own step is left as it was;
+    # the pitch controller's user nerve is entered with x0 = CameraAngleVerticalCtrl (hle_odyssey_camera.c)
+    (0xbd2b0, 23, 'fc1c0fe8', 'CameraPoserFollowLimit yaw apply entry; orig str d8, [sp, #-0x40]!'),
+    (0xbd42c, 24, 'bd01c260', 'CameraPoserFollowLimit yaw apply, after the last bl; orig str s0, [x19, #0x1c0]'),
+    (0xb8ca0, 25, 'd10143ff', 'CameraAngleVerticalCtrl NrvUserCtrl entry; orig sub sp, sp, #0x50'),
+    # Touch screens (hle_odyssey_ui.c): every cutscene state asks tryStartSkip each frame, so a call marks a cutscene; the moped asks its
+    # jump trigger each ride frame (the caller's lr, saved by the gate block, is in Motorcycle code), which marks riding
+    (0x49bab0, 37, 'f81e0ff3', 'DemoSkip tryStartSkip entry: a cutscene is playing; orig str x19, [sp, #-0x10]!'),
+    (0x5132e0, 38, 'f9403000', 'rs moped jump trigger entry: the player rides the moped; orig ldr x0, [x0, #0x60]'),
   ],
   # Metroid Dread 2.1.0 main: the movie player posts "link / unlink holders" requests into the dispatcher thread's request ring (main+0x222cc8) and goes on without waiting for them (after an unlink it frees the wrapper object and builds a new one in place).
   # On hardware the dispatcher thread (priority 30, core 0 only) preempts the main thread (priority 44, core 0) at once and finishes first; the host waits for the ring to empty after each post (hle_movie.c movie_ring_wait). The gates sit on the add x22, x22, #8 after the bl
   '646761f643afebb379edd5e6a5151af2': [
     (0x2247a4, 19, '910022d6', 'link request posted (loop at main+0x224728, x19 = request ring): wait for the dispatcher; orig add x22, x22, #8'),
     (0x2248e4, 20, '910022d6', 'unlink request posted (loop at main+0x224868, x19 = request ring): wait for the dispatcher before the object is freed; orig add x22, x22, #8'),
+  ],
+}
+# ---- Registered result gates: {NSO build ID: [(offset, number, original instruction word, reason)]}, function entries only. Numbers share the OBS_* space; the host callback
+# may answer for the function: it sets x16 to 1 and x0 to the result, and the gate block returns at once; otherwise (x16 = 0, also with no callback attached) the original
+# entry instruction runs and the function continues. x16 carries no value at a function entry (AAPCS64 veneer register), and dm_gate writes x0..x29 back ----
+RETS = {
+  # Odyssey 1.4.1: rs::isTriggerUiDecide(const IUseSceneObjHolder*) answers true once for a tapped menu item, after the menu's own cursor is on it (hle_odyssey_ui.c)
+  'b424be150a8e7d78701cbe7a439d9ebf': [
+    (0x51d1e0, 26, 'a9bf7bfd', 'rs::isTriggerUiDecide entry; orig stp x29, x30, [sp, #-0x10]!'),
+    # al::KeyRepeatCtrl::isUp / isDown answer true once for one controller (the kingdom select's), so a tapped kingdom is reached by the game's own step
+    (0x5d6320, 27, 'b9400808', 'KeyRepeatCtrl::isUp entry; orig ldr w8, [x0, #8]'),
+    (0x5d6370, 28, 'b9400c08', 'KeyRepeatCtrl::isDown entry; orig ldr w8, [x0, #0xc]'),
+    # the UI left stick (s0, s1) answers the map's drag while a map nerve runs: the map scrolls, snaps and selects exactly as with the stick
+    (0x51e720, 29, '6dbd23e9', 'rs UI left stick entry; orig stp d9, d8, [sp, #-0x30]!'),
+    # the touch Back button, the cutscene Skip label and the collection list's tab bar answer these once (cancel, close, pause, previous/next tab)
+    (0x51d280, 30, 'a9bf7bfd', 'rs::isTriggerUiCancel entry; orig stp x29, x30, [sp, #-0x10]!'),
+    (0x51ea70, 31, 'f81e0ff3', 'rs map close trigger entry; orig str x19, [sp, #-0x20]!'),
+    (0x51eb70, 32, 'f81d0ff5', 'rs collection list close trigger entry; orig str x21, [sp, #-0x30]!'),
+    (0x51d320, 33, 'a9be4ff4', 'rs::isTriggerUiPause entry (cutscene skip); orig stp x20, x19, [sp, #-0x20]!'),
+    (0x51d6e0, 34, 'f81e0ff3', 'rs previous-tab trigger entry; orig str x19, [sp, #-0x20]!'),
+    (0x51d650, 35, 'f81e0ff3', 'rs next-tab trigger entry; orig str x19, [sp, #-0x20]!'),
+    (0x51eae0, 36, 'a9be4ff4', 'rs map tab-change trigger entry; orig stp x20, x19, [sp, #-0x20]!'),
+    # message pad pictures: asked by the PadStyle tag's draw (lr main+0x6a47e8), "handheld" while touch is in use picks the touch variants
+    (0x5d3ec0, 39, '3100041f', 'pad style handheld check entry; orig cmn w0, #1'),
+    # the wardrobe's own key repeat (StageSceneStateCloset +0x1d0) steps left / right and switches between its two lists, once per tap
+    (0x4f7e90, 40, '39402008', 'wardrobe key repeat left entry; orig ldrb w8, [x0, #8]'),
+    (0x4f7ec0, 41, '39402008', 'wardrobe key repeat right entry; orig ldrb w8, [x0, #8]'),
+    (0x4f7ef0, 42, '39402008', 'wardrobe key repeat to the cap list entry; orig ldrb w8, [x0, #8]'),
+    (0x4f7f20, 43, '39402008', 'wardrobe key repeat to the outfit list entry; orig ldrb w8, [x0, #8]'),
+    # footer actions without a touch control: Y (option settings Reset, wardrobe Random) and the map's right stick zoom
+    (0x51d890, 44, 'f81e0ff3', 'rs Y trigger entry; orig str x19, [sp, #-0x10]!'),
+    (0x51e830, 45, 'f81e0ff3', 'rs UI right stick entry; orig str x19, [sp, #-0x10]!'),
+    # horizontal lists (shops and others): a tapped item is reached by one step the list's owner takes itself
+    (0x51d4a0, 46, 'f81e0ff3', 'rs UI repeat right entry; orig str x19, [sp, #-0x10]!'),
+    (0x51d410, 47, 'f81e0ff3', 'rs UI repeat left entry; orig str x19, [sp, #-0x10]!'),
+    (0x51da40, 48, 'f81e0ff3', 'rs UI trigger right entry; orig str x19, [sp, #-0x10]!'),
+    (0x51dad0, 49, 'f81e0ff3', 'rs UI trigger left entry; orig str x19, [sp, #-0x10]!'),
   ],
 }
 BUILD_ID = d[0x40:0x50].hex()
@@ -478,6 +525,25 @@ def site_obs(off, oid, word):
     emit(word)
     emit(B(here(), off + 4))
     gates.append((ret, 'obs', oid, off))
+    return start
+
+def site_ret(off, oid, word):
+    """Result gate at a function entry: enter the host gate (arg = gate number) → restore x29/x30 → x16 != 0: return with the host's x0 → otherwise execute the original
+        instruction and jump back to off+4."""
+    ins = dis(word, off)
+    assert ins.mnemonic not in ('adr', 'adrp', 'b', 'bl', 'br', 'blr', 'ret', 'cbz', 'cbnz', 'tbz', 'tbnz') and not ins.mnemonic.startswith('b.') \
+        and not (ins.mnemonic.startswith('ldr') and '[' not in ins.op_str) and not has18(ins), f'result gate original instruction cannot be relocated {off:#x} {ins.mnemonic} {ins.op_str}'
+    start = here()
+    emit(STP_PRE(29, 30, 31, -16))
+    emit_gate_call()
+    emit(BLR(30))
+    ret = here()
+    emit(LDP_POST(29, 30, 31, 16))
+    emit(0xB4000000 | (2 << 5) | 16)   # cbz x16, +8 (past the ret)
+    emit(0xD65F03C0)                   # ret
+    emit(word)
+    emit(B(here(), off + 4))
+    gates.append((ret, 'ret', oid, off))
     return start
 
 # ---- Exclusive windows ----
@@ -837,6 +903,14 @@ for off, oid, ow, why in obs:
     assert off in set(starts) or after_bl, f'observation gate neither at a function entry nor after a bl {off:#x}'
     assert off < TEXT_END and off not in kinds and not any(lo <= off < hi for wseg in windows for lo, hi in [(wseg[0].address, wseg[-1].address + 4)]), f'observation gate conflicts with a rewrite site {off:#x}'
     put_branch(off, site_obs(off, oid, w)); stat('obs')
+rets = list(RETS.get(BUILD_ID, []))
+for off, oid, ow, why in rets:
+    w = struct.unpack_from('<I', IMG, off)[0]
+    assert f'{w:08x}' == ow, f'result gate original instruction mismatch {off:#x}: {w:08x}'
+    assert off in set(starts), f'result gate not at a function entry {off:#x}'
+    assert off < TEXT_END and off not in kinds and not any(lo <= off < hi for wseg in windows for lo, hi in [(wseg[0].address, wseg[-1].address + 4)]), f'result gate conflicts with a rewrite site {off:#x}'
+    assert off not in {o for o, *_ in obs}, f'result gate on an observation gate {off:#x}'
+    put_branch(off, site_ret(off, oid, w)); stat('ret')
 
 # ---- Frame step in whole vsyncs (The Legend of Zelda: Tears of the Kingdom 1.4.3, Breath of the Wild 1.9.0 and Hyrule Warriors: Age of Calamity 1.3.0 main, host only) ----
 # The games step their game time by a whole number of vsyncs (1/60 s) per frame that their own interval logic picks. With the stubs the host picks it (hle_nvn.c fstep_tick,
@@ -1186,4 +1260,5 @@ with open(P('cuts.tsv'), 'w') as f:
 with open(P('obs.tsv'), 'w') as f:
     f.write(f'# BUILD_ID\t{BUILD_ID}\n')
     for off, oid, ow, why in obs: f.write(f'{off:#x}\t{oid}\t{ow}\t{why}\n')
+    for off, oid, ow, why in rets: f.write(f'{off:#x}\t{oid}\t{ow}\tresult gate: {why}\n')
 print(NAME, stats, 'cuts', len(cuts), 'obs', len(obs), 'patch', len(patch), 'PATCH_OFF', hex(PATCH_OFF), 'slot_refs', len(fix), 'gates', len(gates))

@@ -2,17 +2,22 @@
 // Super Mario Odyssey's 44 movies are MP4 / H.264 (the hint videos in its tutorial boxes, the kingdom travel videos): 41 High or Main profile with B-frames, 3 Baseline.
 // The SDK's demuxer hands over one access unit per packet with Annex B start codes; SPS / PPS come in Configure's csd-0 / csd-1 (as with Android's MediaCodec) and may also appear in the stream.
 // VideoToolbox wants a format description built from SPS / PPS and NAL units with 4-byte length prefixes. Decoding is synchronous and yields pictures in decode order; MediaCodec yields them
-// in presentation order, so pictures wait in a queue sorted by presentation time and leave it once more than `depth` are queued (4 when the profile has B-frames, 0 for Baseline), or all at the end of the stream
+// in presentation order, so pictures wait in a queue sorted by presentation time and leave it once more than `depth` are queued (4 when the profile has B-frames, 0 for Baseline), or all at the end of the stream.
+// A movie can loop by sending its first packets again, times restarting at 0, with no flush (Odyssey's kingdom previews): a picture more than
+// AVC_REWIND before the latest one starts a new pass, and every picture of the old pass leaves first. Sorted by time alone, the old pass's last
+// pictures stayed at the back of the queue for good, the reorder window shrank to nothing, and B-frames came out of order (a constant stutter)
 #include "hle.h"
 #include <VideoToolbox/VideoToolbox.h>
 #include <arm_neon.h>
 #include "hle_movie_avc.h"
 
 #define QMAX 16
+#define AVC_REWIND 500000   // µs: further back than any reordering, a new pass
 struct mavc {
     uint8_t sps[512], pps[512]; int nsps, npps, dirty;
     CMVideoFormatDescriptionRef fd; VTDecompressionSessionRef vs;
-    struct { CVPixelBufferRef pb; int64_t pts; } q[QMAX]; int nq, depth;
+    struct { CVPixelBufferRef pb; int64_t pts; unsigned pass; } q[QMAX]; int nq, depth;
+    unsigned pass; int64_t latest; int seen;   // the current pass and its latest picture time
     uint8_t *au; size_t aucap;   // length-prefixed copy of the access unit being decoded
     int red, rgba;               // rgba: pictures as 4-byte RGBA (native texture mode, Monster Hunter Rise) instead of NV12
 };
@@ -22,7 +27,7 @@ static void close_session(mavc *a) {
     if (a->vs) { VTDecompressionSessionWaitForAsynchronousFrames(a->vs); VTDecompressionSessionInvalidate(a->vs); CFRelease(a->vs); a->vs = NULL; }
     if (a->fd) { CFRelease(a->fd); a->fd = NULL; }
 }
-void mavc_drop(mavc *a) { for (int i = 0; i < a->nq; i++) CVPixelBufferRelease(a->q[i].pb); a->nq = 0; }
+void mavc_drop(mavc *a) { for (int i = 0; i < a->nq; i++) CVPixelBufferRelease(a->q[i].pb); a->nq = 0; a->seen = 0; }
 void mavc_free(mavc *a) { if (!a) return; close_session(a); mavc_drop(a); free(a->au); free(a); }
 int mavc_queued(const mavc *a) { return a->nq; }
 
@@ -68,8 +73,11 @@ static void on_frame(void *ref, void *src, OSStatus st, VTDecodeInfoFlags fl, CV
     if (st || !img) { if (!a->red++) LOG("[RED] movie: AVC decode error (VideoToolbox %d, first case)", (int)st); return; }
     if (a->nq == QMAX) { if (!a->red++) LOG("[RED] movie: AVC reorder queue full, dropping the oldest frame"); CVPixelBufferRelease(a->q[0].pb); memmove(a->q, a->q + 1, --a->nq * sizeof a->q[0]); }
     int64_t t = pts.timescale ? pts.value * 1000000 / pts.timescale : 0;
-    int k = a->nq; while (k > 0 && a->q[k - 1].pts > t) { a->q[k] = a->q[k - 1]; k--; }
-    a->q[k].pb = CVPixelBufferRetain(img); a->q[k].pts = t; a->nq++;
+    if (a->seen && t < a->latest - AVC_REWIND) { a->pass++; a->latest = t; }   // the movie started over
+    if (!a->seen || t > a->latest) a->latest = t;
+    a->seen = 1;
+    int k = a->nq; while (k > 0 && (a->q[k - 1].pass > a->pass || (a->q[k - 1].pass == a->pass && a->q[k - 1].pts > t))) { a->q[k] = a->q[k - 1]; k--; }
+    a->q[k].pb = CVPixelBufferRetain(img); a->q[k].pts = t; a->q[k].pass = a->pass; a->nq++;
 }
 static int open_session(mavc *a) {
     close_session(a);

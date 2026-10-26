@@ -35,6 +35,8 @@ def main():
             ('aspect', ['dm/host/tests/t_present_aspect.c']),
             ('display-geometry', ['dm/ios/tests/t_display_geometry.c']),
             ('live-camera', ['dm/host/tests/t_odyssey_display.c']),
+            ('touch-camera', ['dm/host/tests/t_odyssey_camera.c']),
+            ('tappable-menu', ['dm/host/tests/t_odyssey_ui.c']),
         ]:
             binary = build / name
             run(common + sources + ['-o', binary])

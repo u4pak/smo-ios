@@ -32,7 +32,9 @@ have been tested in gameplay. [Installation](#install-it-yourself)
 
 ## Controls
 
-Connect a controller in **Settings → Bluetooth** before opening the game.
+Connect a controller in **Settings → Bluetooth**, before or during play. The
+game switches to it as soon as it connects, hiding the touch controls, and
+returns to touch controls when it disconnects.
 
 Use the sticks to move and look, the face buttons to jump/throw Cappy, and
 L2/R2 to crouch or roll. Shake the controller for
@@ -42,8 +44,72 @@ the appropriate controller.
 Tap the top-center **gear** to open Settings. A drag, cancelled touch or
 second gear finger stays consumed without pressing a game control. VoiceOver
 also offers **Open settings**. The gear remains available with a controller.
-The full Odyssey touch layout always includes the D-pad and invisible floating
-right stick, alongside the fixed left stick and Nintendo face diamond.
+The full Odyssey touch layout always includes the D-pad, alongside the fixed
+left stick and Nintendo face diamond. Swipe anywhere in the right half of the
+screen (away from the buttons) to turn the camera, like a 3D mobile game: the
+normal follow camera turns with your finger directly, without the right stick's
+dead zone or easing, by an amount set with **Swipe look sensitivity** in
+Settings. Cameras that only read a stick (some special scenes) still turn by a
+right-stick turn the length of the swipe. Swipe-to-look only applies to touch
+controls; a controller's right stick works as usual.
+
+Menus and screens can be tapped directly, and each tap is handled by the
+game's own menu code (same highlight, sounds and animations as a button press):
+
+- **Title and pause menus**: tap **Resume**, **Resume 2P**, **New Game**,
+  **Options** or the pause menu's items to choose them.
+- **Options and their sub-menus**: tap a row to choose it. On setting rows,
+  tap the left or right side to step the value that way.
+- **Confirmation windows** (save, load, delete, language and similar): tap an
+  answer.
+- **Dialogue**: tap anywhere to continue instead of pressing A; when an NPC
+  offers choices (including the Odyssey's "Head off to another kingdom?"),
+  tap one.
+- **Kingdom select**: tap a kingdom on the strip to turn the globe to it; tap
+  the selected kingdom to travel.
+- **Map**: drag to scroll the map (at a gentle speed); tap a checkpoint or other icon to center on it the way the cursor
+  snaps to icons, then tap it again to use it. Tap the left or right half of
+  the tab bar at the top to switch between the map, moons, captures and other
+  collection lists.
+- **Shops**: tap an item to scroll to it (the shop shows its description and
+  price as usual); tap the selected item to buy it.
+- **Moon/music/capture/souvenir lists, save-data confirmations, mode select
+  and mini-game menus**: tap an item to choose it.
+- **Wardrobe**: tap an outfit or cap to scroll to it and try it on (tapping
+  the other row switches rows first); tap the item you're trying on to wear it.
+- **Race results**: tap anywhere to continue.
+- **Cutscenes**: the touch controls stay hidden and the skip hint reads **Tap
+  anywhere to Skip** (English text) while you use touch. Cutscenes that show the
+  hint right away skip with one tap; the ones that wait for a button show it on
+  the first tap and skip on the second.
+- **Info messages**: tap anywhere to continue.
+
+Actions that a menu only lists in its bottom controller guide get their own
+buttons in the bottom-right corner while you use touch: **Lists** (map and
+kingdom select), zoom in/out (map; hold), **Reset** (option settings) and
+**Random** (wardrobe).
+
+Screens whose way out is the B button get a **Back** button in the top-left
+corner while you use touch (options, the map, kingdom select, shops, lists,
+the wardrobe, confirmations and the pause menu). Any screen the port doesn't
+recognize brings the controls back after about two seconds, so you are never
+left without a way to navigate.
+
+On the moped, the face buttons become a big **pedal** (accelerate, like Y; it
+tilts back while held) and a smaller **up-arrow** button (jump, like B). While
+you use touch, the moped's on-screen hint shows the same pedal and arrow
+pictures in place of the Y and B icons, switching as you go between touch and
+a controller; controller names in the game's hints read **Controller /
+Device** (English text) instead of Pro Controller.
+
+The touch controls stay hidden from launch, through loading and on these
+screens, and fade in once the in-game HUD is up. In the touch layout the **+**
+and **−** buttons show pause and map symbols. Controller hints that touch play
+doesn't need (the button guide at the bottom of menus and the flashing button
+icon in dialogue and confirmation windows) are hidden while you use touch and
+come back when a controller connects or you press one of its buttons. This
+needs a prepared phone or 4:3 build; plain 16:9 builds keep the controls
+visible and the hints in place as before.
 
 The frame-rate counter sits in the safe-area top-left on iPhone and iPad. Tap
 it to hide its text; tap the same corner again to reveal it. Other gameplay
@@ -51,8 +117,13 @@ touches stay active. The app remembers visibility, and generated presentation
 keeps the FG marker. The player confirmed hide/reveal working on the M5 iPad
 in the current build; the new phone package remains pending installation.
 
-Settings has exactly three switches: **Gyro**, **Device haptics**, and **Also
-with controller**. Gyro On uses Auto, preferring fresh controller motion and
+Settings has four switches, **Gyro**, **Device haptics**, **Also with
+controller** and **Touch controls with controller**, and a **Swipe look
+sensitivity** slider (0.25× to 3×, default 1×, stored on the device).
+**Touch controls with controller** keeps the on-screen controls (and
+swipe-to-look) usable while a controller is connected; it is on by default.
+With it on, the drawings fade out while the controller is in use and come back
+with the next touch, which still presses what it lands on. Gyro On uses Auto, preferring fresh controller motion and
 falling back to iPhone/iPad sensors. Off disables motion. Existing calibration
 and controller feedback are preserved. The player reports iPhone device gyro
 working; other orientations, handoffs and iPad gyro need their own checks.
@@ -71,7 +142,7 @@ cap throws, standard coins and ground pounds. Special actor variants are not
 implied. Advanced stored preferences are retained without extra menu sections.
 
 Existing stored frame-interpolation preferences are retained, and
-`DM_FRAMEGEN` environment overrides keep precedence. The three-switch sheet
+`DM_FRAMEGEN` environment overrides keep precedence. The settings sheet
 adds no display menu. No setting changes the game's 60 Hz simulation.
 
 ## Display and performance

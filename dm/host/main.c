@@ -106,6 +106,8 @@ static void host_preload(int argc, char **argv) {
     { void dm_odyssey_local_feedback_install(void); dm_odyssey_local_feedback_install(); } // Separately guarded local-device cues
     { void dm_odyssey_display_install(void); dm_odyssey_display_install(); } // Paired camera/HUD, guarded 4:3 default.
     { void dm_odyssey_display_hud_install(void); dm_odyssey_display_hud_install(); }
+    { void dm_odyssey_camera_install(void); dm_odyssey_camera_install(); } // Touch swipes turn the follow camera directly.
+    { void dm_odyssey_ui_install(void); dm_odyssey_ui_install(); } // Tapped menu rows are chosen by the menu's own nerve.
 }
 static struct { int argc; char **argv; pthread_t th; _Atomic int started; } g_pre;
 static void *preload_thread(void *a) { (void)a; host_preload(g_pre.argc, g_pre.argv); return NULL; }

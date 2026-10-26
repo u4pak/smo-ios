@@ -8,6 +8,21 @@ now take node 44, which ends the talk directly (node 50) instead of adding
 "Play again sometime!", so no flow entry can reach StartConnect. Node 44's
 label, used by no other flow, gets the replacement text in every language,
 keeping Luigi's voice tag. The supplied files are verified and never modified.
+
+The same pass renames the Pro Controller for touch players: the English
+(USen, EUen) pad-style names and system glossary entry read "Controller /
+Device" instead, keeping their leading pad icon tags.
+
+Touch pictures: while touch is in use the host draws the handheld variant of
+every message pad picture (hle_odyssey_ui.c). Handheld and controller variants
+are the same pictures except the controller names, so the handheld JoyCon,
+JoyConR and JoyConIconOnly entries take the controller's content in every
+language. The moped tutorial's accelerate and jump pictures (Tutorial.msbt
+Motorcycle) name LeftButtonL and LeftButtonR as their handheld variants: those
+entries show the SL and SR glyphs, which prepare_odyssey_glyphs.py redraws as a
+pedal and an up arrow. In English the cutscene guide ("{+} Skip") takes a + pad
+picture whose handheld variant, LeftButtonPlus (single left Joy-Con only), now
+reads "Tap anywhere to": touch shows "Tap anywhere to Skip".
 """
 from __future__ import annotations
 
@@ -25,6 +40,17 @@ FLOW_MEMBER = 'NpcStandby.byml'
 MESSAGES_MEMBER = 'TimeBalloon.msbt'
 LABEL = 'TimeBalloon_Separate'
 LANGUAGES = 14  # Every language folder of the exact 1.4.1 RomFS.
+DEVICE = ('Pro Controller', 'Controller / Device')
+DEVICE_LANGUAGES = ('USen', 'EUen')
+DEVICE_LABELS = {'PadStyle.msbt': ('FullKeyJoyCon', 'FullKeyJoyConR'), 'GlossarySystem.msbt': ('JoyCon_R_00',)}
+TOUCH_NAMES = ('JoyCon', 'JoyConR', 'JoyConIconOnly')     # PadStyle Handheld<name> = FullKey<name>
+MOPED = ('Tutorial.msbt', 'Motorcycle')
+MOPED_PICTURES = {5: ('HandheldButtonY', 'LeftButtonL'), 3: ('HandheldButtonB', 'LeftButtonR')}   # PadStyle tag type: handheld name
+PAD_TAG_GROUP, PAD_TAG_HANDHELD = 6, 1                    # ProjectTag PadStyle*: names for Dual, Handheld, FullKey, Left, Right
+SKIP = ('PlayGuideSkip.msbt', 'PlayGuideDemoSkip')
+SKIP_PAIR = (29, ['MenuButton', 'MenuPlayerL', 'MenuPlayerR'])  # PadPairMenu: the guide's + picture
+SKIP_PICTURE = (11, ['DualButtonPlus', 'LeftButtonPlus', 'FullKeyButtonPlus', 'LeftButtonPlus', 'RightButtonPlus'])  # PadStyleButtonPlus
+SKIP_TOUCH = ('LeftButtonPlus', 'Tap anywhere to')
 
 
 class Byml:
@@ -144,6 +170,108 @@ def patch_flow(data: bytes) -> bytes:
 
 def replace_message(data: bytes, label: str, text: str) -> bytes:
     """Replace one UTF-16 MSBT message, keeping its leading voice tag."""
+    def change(old: bytes, order: str) -> bytes:
+        if len(old) < 8 or struct.unpack_from(order + '3H', old, 0) != (0x0E, 4, 0):
+            raise ValueError(f'{label}: expected a leading voice tag')
+        voice = old[:8 + struct.unpack_from(order + 'H', old, 6)[0]]
+        return voice + text.encode('utf-16-le' if order == '<' else 'utf-16-be') + b'\0\0'
+    return _rewrite(data, label, change)
+
+
+def replace_text(data: bytes, label: str, old: str, new: str) -> bytes:
+    """Replace the one occurrence of old in a UTF-16 MSBT message; its tags stay as they are."""
+    def change(message: bytes, order: str) -> bytes:
+        codec = 'utf-16-le' if order == '<' else 'utf-16-be'
+        units, found, at = old.encode(codec), [], 0
+        while (at := message.find(units, at)) >= 0:
+            if at % 2 == 0:
+                found.append(at)
+            at += 2
+        if len(found) != 1:
+            raise ValueError(f'{label}: expected one {old!r}')
+        return message[:found[0]] + new.encode(codec) + message[found[0] + len(units):]
+    return _rewrite(data, label, change)
+
+
+def copy_message(data: bytes, label: str, source: str) -> bytes:
+    """Give label the content of source (same MSBT)."""
+    found = {}
+    _rewrite(data, source, lambda message, order: found.setdefault('raw', message))
+    return _rewrite(data, label, lambda message, order: found['raw'])
+
+
+def _tags(message: bytes, order: str):
+    """Yield (offset, group, type, payload) for each tag of a UTF-16 message."""
+    at = 0
+    while at + 2 <= len(message):
+        unit = struct.unpack_from(order + 'H', message, at)[0]
+        if unit == 0x0E:
+            group, kind, size = struct.unpack_from(order + '3H', message, at + 2)
+            yield at, group, kind, message[at + 8:at + 8 + size]
+            at += 8 + size
+        elif unit == 0x0F:
+            at += 6
+        else:
+            at += 2
+
+
+def rename_pad_picture(data: bytes, label: str, kind: int, old: str, new: str) -> bytes:
+    """In label's one PadStyle tag of this type, name new as the handheld variant (it was old)."""
+    def change(message: bytes, order: str) -> bytes:
+        codec = 'utf-16-le' if order == '<' else 'utf-16-be'
+        found = [(at, payload) for at, group, k, payload in _tags(message, order) if group == PAD_TAG_GROUP and k == kind]
+        if len(found) != 1:
+            raise ValueError(f'{label}: expected one pad picture of type {kind}')
+        at, payload = found[0]
+        names, pos = [], 0
+        while pos < len(payload):
+            length = struct.unpack_from(order + 'H', payload, pos)[0]
+            names.append(payload[pos + 2:pos + 2 + length].decode(codec))
+            pos += 2 + length
+        if len(names) != 5 or names[PAD_TAG_HANDHELD] != old:
+            raise ValueError(f'{label}: unexpected pad picture names {names}')
+        names[PAD_TAG_HANDHELD] = new
+        body = b''.join(struct.pack(order + 'H', 2 * len(n)) + n.encode(codec) for n in names)
+        tag = struct.pack(order + '4H', 0x0E, PAD_TAG_GROUP, kind, len(body)) + body
+        return message[:at] + tag + message[at + 8 + len(payload):]
+    return _rewrite(data, label, change)
+
+
+def _pad_tag(kind: int, names, order: str) -> bytes:
+    codec = 'utf-16-le' if order == '<' else 'utf-16-be'
+    body = b''.join(struct.pack(order + 'H', 2 * len(n)) + n.encode(codec) for n in names)
+    return struct.pack(order + '4H', 0x0E, PAD_TAG_GROUP, kind, len(body)) + body
+
+
+def _touch_skip(data: bytes) -> bytes:
+    """The guide's leading pad-pair picture becomes a + pad picture with a touch (handheld) variant."""
+    def change(message: bytes, order: str) -> bytes:
+        tags = list(_tags(message, order))
+        expected = _pad_tag(SKIP_PAIR[0], SKIP_PAIR[1], order)
+        if not tags or tags[0][0] != 0 or message[:len(expected)] != expected:
+            raise ValueError(f'{SKIP[1]}: unexpected skip guide')
+        return _pad_tag(SKIP_PICTURE[0], SKIP_PICTURE[1], order) + message[len(expected):]
+    return _rewrite(data, SKIP[1], change)
+
+
+def _touch_skip_label(data: bytes) -> bytes:
+    codec = lambda order: 'utf-16-le' if order == '<' else 'utf-16-be'
+    return _rewrite(data, SKIP_TOUCH[0], lambda message, order: SKIP_TOUCH[1].encode(codec(order)) + b'\0\0')
+
+
+def _touch_pictures(data: bytes) -> bytes:
+    for name in TOUCH_NAMES:
+        data = copy_message(data, 'Handheld' + name, 'FullKey' + name)
+    return data
+
+
+def _moped(data: bytes) -> bytes:
+    for kind, (old, new) in MOPED_PICTURES.items():
+        data = rename_pad_picture(data, MOPED[1], kind, old, new)
+    return data
+
+
+def _rewrite(data: bytes, label: str, change) -> bytes:
     if len(data) < 0x20 or data[:8] != b'MsgStdBn' or data[8:10] not in (b'\xff\xfe', b'\xfe\xff') or data[0x0c] != 1:
         raise ValueError('expected a UTF-16 MSBT')
     order = '<' if data[8:10] == b'\xff\xfe' else '>'
@@ -174,11 +302,7 @@ def replace_message(data: bytes, label: str, text: str) -> bytes:
     index = labels.get(label)
     if index is None or index >= n:
         raise ValueError(f'MSBT has no {label}')
-    old = strings[index]
-    if len(old) < 8 or struct.unpack_from(order + '3H', old, 0) != (0x0E, 4, 0):
-        raise ValueError(f'{label}: expected a leading voice tag')
-    voice = old[:8 + struct.unpack_from(order + 'H', old, 6)[0]]
-    strings[index] = voice + text.encode('utf-16-le' if order == '<' else 'utf-16-be') + b'\0\0'
+    strings[index] = change(strings[index], order)
     table = bytearray(struct.pack(order + 'I', n))
     at = 4 + 4 * n
     for s in strings:
@@ -240,33 +364,52 @@ def _member(sarc: bytes, name: str, label: str) -> tuple[int, int]:
     return found[0]
 
 
-def _repack(source: Path, member: str, change) -> tuple[bytes, bytes]:
+def _repack(source: Path, changes) -> tuple[bytes, bytes]:
     before = source.read_bytes()
     if before[:4] != b'Yaz0':
         raise ValueError(f'{source.name}: expected Yaz0')
-    sarc = common.yaz0_decode(before)
-    lo, hi = _member(sarc, member, source.name)
-    new = change(sarc[lo:hi])
-    patched = sarc[:lo] + new + sarc[hi:] if len(new) == hi - lo else replace_member(sarc, member, new)
+    patched = sarc = common.yaz0_decode(before)
+    for member, change in changes:
+        lo, hi = _member(patched, member, source.name)
+        new = change(patched[lo:hi])
+        patched = patched[:lo] + new + patched[hi:] if len(new) == hi - lo else replace_member(patched, member, new)
+    if patched == sarc:
+        raise ValueError(f'{source.name}: nothing changed')
     after = common.yaz0_literal(patched, before[:16])
     if common.yaz0_decode(after) != patched:
         raise ValueError(f'{source.name}: Yaz0 round-trip failed')
     return before, after
 
 
+def _device_names(data: bytes, labels) -> bytes:
+    for label in labels:
+        data = replace_text(data, label, *DEVICE)
+    return data
+
+
 def prepare(romfs: Path, overlay: Path) -> list[dict]:
-    """Write the changed flow and message archives under overlay; return records."""
-    jobs = [(FLOW, FLOW_MEMBER, patch_flow)]
+    """Write the changed flow and message archives under overlay; return one record per archive."""
+    jobs = {FLOW: [(FLOW_MEMBER, patch_flow)]}
     messages = sorted(romfs.glob('LocalizedData/*/MessageData/SystemMessage.szs'))
     if len(messages) != LANGUAGES:
         raise ValueError(f'expected {LANGUAGES} SystemMessage archives, found {len(messages)}')
-    jobs += [(path.relative_to(romfs), MESSAGES_MEMBER, lambda m: replace_message(m, LABEL, MESSAGE)) for path in messages]
+    renamed = 0
+    for path in messages:
+        changes = [(MESSAGES_MEMBER, lambda m: replace_message(m, LABEL, MESSAGE))]
+        if path.parts[-3] in DEVICE_LANGUAGES:
+            changes += [(member, lambda m, labels=labels: _device_names(m, labels)) for member, labels in DEVICE_LABELS.items()]
+            changes += [('PadStyle.msbt', _touch_skip_label), (SKIP[0], _touch_skip)]
+            renamed += 1
+        changes += [('PadStyle.msbt', _touch_pictures), (MOPED[0], _moped)]   # after the renames: touch shows the new names
+        jobs[path.relative_to(romfs)] = changes
+    if renamed != len(DEVICE_LANGUAGES):
+        raise ValueError(f'expected the {", ".join(DEVICE_LANGUAGES)} SystemMessage archives')
     records = []
-    for relative, member, change in jobs:
-        before, after = _repack(romfs / relative, member, change)
+    for relative, changes in jobs.items():
+        before, after = _repack(romfs / relative, changes)
         target = overlay / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(after)
-        records.append({'relative_path': str(relative), 'member': member,
+        records.append({'relative_path': str(relative), 'members': [member for member, _ in changes],
                         'source_sha256': common.sha(before), 'output_sha256': common.sha(after)})
     return records
