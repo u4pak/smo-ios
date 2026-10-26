@@ -46,8 +46,14 @@ def main():
             run(['xcrun', 'clang', '-O1', '-Wno-unused-function', '-Wno-incompatible-pointer-types-discards-qualifiers',
                  '-I', ROOT / 'dm/host', '-I', ROOT / 'dm/host/gen/0100000000010000',
                  '-I', ROOT / 'dm/games/0100000000010000', *flags, 'dm/host/tests/t_fs_save_committed.c',
-                 'dm/host/tests/t_fs_save_committed_stub.c', 'dm/host/tests/t_fs_stub.c', 'dm/host/hle_bigstack.c', '-o', binary])
+                 'dm/host/tests/t_fs_save_committed_stub.c', 'dm/host/tests/t_fs_stub.c', 'dm/host/dmz.c', 'dm/host/hle_bigstack.c',
+                 '-lcompression', '-o', binary])
             run([binary])
+        binary = build / 'dmz'   # compressed RomFS / shader bundle reading through the file layer, under the sanitizers
+        run(['xcrun', 'clang', '-O1', '-g', '-Wno-unused-function', '-Wno-incompatible-pointer-types-discards-qualifiers', '-fsanitize=address,undefined',
+             '-I', ROOT / 'dm/host', '-I', ROOT / 'dm/host/gen/0100000000010000', '-I', ROOT / 'dm/games/0100000000010000',
+             'dm/host/tests/t_dmz.c', 'dm/host/dmz.c', 'dm/host/hle_bigstack.c', '-lcompression', '-o', binary])
+        run([binary])
         archive = build / 'archive'
         gear = build / 'gear-samples'
         run(['xcrun', 'clang', '-fobjc-arc', '-Wall', '-Wextra', '-Werror', '-I', ROOT / 'dm/host',

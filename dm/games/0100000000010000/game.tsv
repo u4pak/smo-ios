@@ -25,7 +25,14 @@ shader_versions	v393216
 # ---- Files ----
 modules	main subsdk0 sdk
 romfs_marker	SoundData/SeResourceStd2nd.aras
-zip_store	.aras:.bfsar:.bfstm:.mp4:.szs:.metallib
+zip_store	.aras:.bfsar:.bfstm:.mp4:.szs:.metallib:.dmz
+
+# ---- IPA size ----
+# RomFS files with these suffixes go into the IPA as DMZ (dm/host/dmz.h): chunked LZFSE read back by the host's file layer, a Yaz0 archive as a Yaz0 stream over its
+# decompressed bytes. 5.50 GB of these files take 4.51 GB; a file packing does not shrink by 2% stays as it is (the movies do not shrink, so they are not listed)
+ipa_romfs_pack	.szs:.bfstm:.aras:.bfsar
+# The iOS shader libraries and their reflection (66,471 files, 590 MB) as one 211 MB bundle, DmIOS.app/msl/<folder>.dmz
+ipa_shader_bundle	on
 
 # ---- Memory ----
 mem_reserve	0x100000000

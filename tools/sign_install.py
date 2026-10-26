@@ -163,7 +163,7 @@ def main(argv=None) -> int:
         raise ValueError('Signed entitlements do not match the requested capabilities')
     output.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run([sys.executable, str(REPO / 'dm/ios/tools/pack_ipa.py'), str(output), '--store',
-                    '.aras:.bfsar:.bfstm:.mp4:.szs:.metallib', 'Payload/DmIOS.app=' + str(app)], check=True)
+                    '.aras:.bfsar:.bfstm:.mp4:.szs:.metallib:.dmz', 'Payload/DmIOS.app=' + str(app)], check=True)
     receipt = {'bundle_id': bundle, 'cloud_container': cloud, 'cloud_environment': 'Development' if cloud else None,
                'signed_ipa': str(output), 'expiration': profile['ExpirationDate'].isoformat(),
                'signature_verified': True, 'installed': False}

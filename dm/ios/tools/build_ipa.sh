@@ -99,9 +99,21 @@ with open(sys.argv[1], 'wb') as f:
 PYMETA
 fi
 rm -rf "$APP/msl" "$O/Payload" "$O/out.ipa"   # (the last two: what the copy-and-zip packing left behind)
-P=Payload/DmIOS.app; MAPS=("$P=$APP" "$P/msl/$MSLDIR=$MSL_IOS/$MSLDIR")
+# Size (profile keys ipa_romfs_pack / ipa_shader_bundle, dm/host/dmz.h): RomFS files with the listed suffixes go in as DMZ, chunked LZFSE the host's file layer reads back as the original
+# (a Yaz0 archive as a Yaz0 stream over its decompressed bytes), mirrored in $W/build/ios/romfs (dm/tools/dmz_tree.py; reruns repack only changed files, the rest are hard links);
+# the shader libraries go in as one bundle file DmIOS.app/msl/<folder>.dmz. Every DMZ file is read back through the host's reader and compared before it is used
+PACK=$(python3 "$DM/games/game.py" "$GAME" ipa_romfs_pack 2> /dev/null); BUNDLE=$(python3 "$DM/games/game.py" "$GAME" ipa_shader_bundle 2> /dev/null)
+if [ -n "$PACK$BUNDLE" ]; then DMZ=$O/dmz; cc -O2 -o "$DMZ" "$DM/tools/dmz.c" "$DM/host/dmz.c" -lcompression || die "build dm/tools/dmz.c"; fi
+P=Payload/DmIOS.app; MAPS=("$P=$APP")
+if [ "$BUNDLE" = on ]; then
+  t "bundle the shader libraries ($MSL_IOS/$MSLDIR)"; "$DMZ" bundle -c 18 "$O/$MSLDIR.dmz" "$MSL_IOS/$MSLDIR" || die "dmz bundle"
+  MAPS+=("$P/msl/$MSLDIR.dmz=$O/$MSLDIR.dmz")
+else MAPS+=("$P/msl/$MSLDIR=$MSL_IOS/$MSLDIR"); fi
 if [ -n "$AOC" ] && [ -d "$AOC" ]; then MAPS+=("$P/aoc=$AOC"); t "add-on content: $(ls "$AOC" | tr '\n' ' ')"; fi
-MAPS+=("$P/romfs=$ROMFS")
+if [ -n "$PACK" ]; then
+  t "pack the RomFS ($PACK)"; python3 "$DM/tools/dmz_tree.py" "$DMZ" "$ROMFS" "$W/build/ios/romfs" --suffix "$PACK" || die "dmz_tree"
+  MAPS+=("$P/romfs=$W/build/ios/romfs")
+else MAPS+=("$P/romfs=$ROMFS"); fi
 t "pack IPA (already-compressed game files stored, everything else deflated)"
 python3 tools/pack_ipa.py "$OUT_IPA" --store "$(gp zip_store)" --skip $P/_CodeSignature --skip $P/embedded.mobileprovision --skip $P/msl --skip $P/aoc --skip $P/romfs "${MAPS[@]}" || die "pack_ipa"
 t "done: $OUT_IPA ($(du -h "$OUT_IPA" | cut -f1))"

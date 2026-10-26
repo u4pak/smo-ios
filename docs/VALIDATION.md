@@ -283,6 +283,28 @@
     distance from the right edge.
   - The first sighting of each drawn layout is logged, for screens that still
     lack taps.
+- Smaller IPA (unit tests, pack-time read-back and a Mac boot comparison; not
+  yet installed on a device):
+  - RomFS archives, music streams and sound archives go in as DMZ files
+    (`dm/host/dmz.h`): 1 MiB chunks of LZFSE, Apple's own codec on iOS, read
+    back by the host's file layer. An archive the game would Yaz0-decode is
+    presented as a Yaz0 stream of literals over its decompressed bytes, behind
+    its original header: sead's `SZSDecompressor` (streaming, `0x97d5c0`, and
+    the parallel loader, `0x97df50`) sizes its buffers by the header's size and
+    alignment, never by the file's. 5.50 GB of such files take 4.51 GB
+    (archives 4.16 → 3.42, streams 1.10 → 0.88). Movies don't shrink and stay
+    as they are.
+  - The 66,471 iOS shader libraries and reflection files (590 MB) go in as one
+    211 MB bundle, `DmIOS.app/msl/<folder>.dmz`; installs no longer copy and
+    hash tens of thousands of small files.
+  - Every packed file is read back through the host's reader and compared with
+    the original before it is used (a Yaz0 view is decoded as Yaz0). The full
+    RomFS packs in about 10 s. `t_dmz` (ASan/UBSan) checks views, sizes,
+    listings, damaged files and bundle lookups against hand-written bytes.
+  - On the Mac the game booted to the first-launch screen from the packed
+    RomFS and shader bundle exactly as from the originals: the same 103 files
+    opened in the same order, no red lines, the same packaged textures, frame
+    4200 reached. Install time, load times and play on a phone are untested.
 - Controllers are picked up when they connect, become current, or finish
   attaching their gamepad profile (short re-checks after a connect), and input
   switches back to touch when they disconnect. **Touch controls with
