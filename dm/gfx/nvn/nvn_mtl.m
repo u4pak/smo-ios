@@ -38,6 +38,7 @@ _Static_assert(C2_TEX + 8 * C2_TEX_SLOTS == C2_SEPTEX && C2_SEPTEX + 8 * 128 == 
 static int c0_ssbo_base(int stage) { return stage == 0 ? 0x110 : stage == 1 ? 0x510 : stage == 5 ? 0x310 : -1; }   // NVN stages 0 vertex, 1 pixel, 5 compute; geometry / hull / domain never seen
 #include "nvn_hmap.h"
 #include "../../host/dm.h"
+#include "../../host/dmz.h"
 #import <CommonCrypto/CommonDigest.h>
 #include <stdarg.h>
 #include <mach-o/dyld.h>
@@ -2527,6 +2528,7 @@ static pthread_mutex_t g_rmu = PTHREAD_MUTEX_INITIALIZER;
 // ---------- Shader mapping table: Switch control section hash → PC metallib (produced by dm/gfx/tools/shader_map.py) ----------
 static NSMutableDictionary<NSString *, NSArray *> *g_shmap;
 static NSString *g_shmap_path, *g_msl_dir;
+static dmz_bundle *g_msl_bundle;   // the IPA's libraries: one DMZ bundle <library directory>.dmz in place of the directory (build_ipa.sh; tens of thousands of files cost the install far more than their bytes)
 static NSString *exe_rel(const char *rel) {
     char buf[4096]; uint32_t n = sizeof buf;
     if (_NSGetExecutablePath(buf, &n)) return nil;
@@ -2550,7 +2552,12 @@ static void shmap_load(void) {
     const char *m = getenv("DM_MSL_DIR");
     // Library directory = <DM_MSL_DIR or default cache>/b-<translation chain version>: the version comes from the game profile's dmsh_chain.h (tools/dmsh_chain.py); a host built from an old source tree only accepts libraries of the old version
     g_msl_dir = [NSString stringWithFormat:@"%@/b-%s", m ? @(m) : [NSString stringWithFormat:@"%s%s/build/cache/metal_shader_cache", getenv("DM_ROOT") ?: getenv("HOME"), getenv("DM_ROOT") ? "" : "/dm-work"], DMSH_CHAIN];
-    if (![NSFileManager.defaultManager fileExistsAtPath:g_msl_dir]) MLOG("[RED] shader library directory %s does not exist: translation chain version %s of this source tree has not been built yet (dm/gfx/tools/dmsh_build.py)", g_msl_dir.UTF8String, DMSH_CHAIN);
+    if (![NSFileManager.defaultManager fileExistsAtPath:g_msl_dir]) {
+        NSString *bp = [g_msl_dir stringByAppendingPathExtension:@"dmz"]; int bfd = open(bp.fileSystemRepresentation, O_RDONLY);   // kept open for the run: every library is read from it
+        if (bfd >= 0 && !(g_msl_bundle = dmz_bundle_open(bfd))) { MLOG("[RED] shader library bundle %s is damaged (errno=%d)", bp.UTF8String, errno); close(bfd); }
+        if (g_msl_bundle) MLOG("shader libraries from the bundle %s", bp.UTF8String);
+        else MLOG("[RED] shader library directory %s does not exist: translation chain version %s of this source tree has not been built yet (dm/gfx/tools/dmsh_build.py)", g_msl_dir.UTF8String, DMSH_CHAIN);
+    }
     NSString *cp = [[path stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"c1_full.tsv"];   // Same directory as the mapping table (Mac: dm/games/<id>; iOS: dm/ inside the App, copied along by build_ipa.sh)
     NSString *ct = cp ? [NSString stringWithContentsOfFile:cp encoding:NSUTF8StringEncoding error:nil] : nil;
     NSString *head = ct ? [[ct componentsSeparatedByString:@"\n"] firstObject] : nil;
@@ -2684,7 +2691,23 @@ static void pso_user_record(const char *fmt, ...) {
 // Build the library from a .metallib file without permanently occupying a file descriptor: newLibraryWithURL keeps that file open for as long as the library object lives (one per game shader - of the 258 descriptors the iOS app permanently holds in a run, 213 are these,
 // while the default soft limit of an iOS process is 256; new shaders created in other acts raise it further). Here the file is mapped into memory and closed immediately, and the library is built from the in-memory data; the mapping is released when the library's data object is freed
 static __thread int t_lib_layer;
+// A file of the library directory from the bundle (nil when the bundle does not hold it); the caller frees *bytes
+static void *msl_bundled(NSString *path, size_t *len) {
+    if (!g_msl_bundle || ![path hasPrefix:[g_msl_dir stringByAppendingString:@"/"]]) return NULL;
+    return dmz_bundle_read(g_msl_bundle, path.lastPathComponent.UTF8String, len);
+}
+static NSData *msl_data(NSString *path) {
+    size_t len; void *b = msl_bundled(path, &len);
+    return b ? [NSData dataWithBytesNoCopy:b length:len freeWhenDone:YES] : g_msl_bundle ? nil : [NSData dataWithContentsOfFile:path];
+}
 static id<MTLLibrary> lib_from_file(NSString *path, NSError **err) {
+    if (g_msl_bundle) {
+        size_t len; void *b = msl_bundled(path, &len);
+        if (!b) { if (err) *err = [NSError errorWithDomain:NSPOSIXErrorDomain code:errno userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"not in the shader library bundle: %@", path]}]; return nil; }
+        t_lib_layer = memmem(b, len, "render_target_array_index", 25) != NULL;
+        dispatch_data_t d = dispatch_data_create(b, len, dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ free(b); });
+        return [g_dev newLibraryWithData:d error:err];
+    }
     int fd = open(path.fileSystemRepresentation, O_RDONLY); struct stat st;
     if (fd < 0 || fstat(fd, &st) || st.st_size <= 0) { if (fd >= 0) close(fd); if (err) *err = [NSError errorWithDomain:NSPOSIXErrorDomain code:errno userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"cannot open %@", path]}]; return nil; }
     size_t len = (size_t)st.st_size; void *m = mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, 0); close(fd);
@@ -2706,7 +2729,7 @@ static NvShader *shader_load(NSString *pc, int stage) {
     NSError *e = nil;
     NSString *lp = [NSString stringWithFormat:@"%@/%@.metallib", g_msl_dir, pc];
     id<MTLLibrary> lib = lib_from_file(lp, &e);
-    NSData *jd = [NSData dataWithContentsOfFile:[NSString stringWithFormat:@"%@/%@.json", g_msl_dir, pc]];
+    NSData *jd = msl_data([NSString stringWithFormat:@"%@/%@.json", g_msl_dir, pc]);
     NSDictionary *j = jd ? [NSJSONSerialization JSONObjectWithData:jd options:0 error:nil] : nil;
     if (!lib || !j) { MLOG("[RED] failed to load shader %s: %s", pc.UTF8String, e ? e.localizedDescription.UTF8String : "no reflection json"); return nil; }
     if (![j[@"chain"] isEqual:@DMSH_CHAIN]) { MLOG("[RED] shader %s has translation chain version %s, but this host expects %s", pc.UTF8String, [[j[@"chain"] description] UTF8String], DMSH_CHAIN); return nil; }

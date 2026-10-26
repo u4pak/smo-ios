@@ -5,6 +5,7 @@
 // Paths look like "rom:/data/x". FileHandle / DirectoryHandle are 8 bytes passed by value, here they store the host fd / DIR*.
 // Struct layout follows the public Horizon ABI: DirectoryEntry = {char name[0x301], pad[3], s8 type, pad[3], s64 size} (0x310 bytes).
 #include "hle.h"
+#include "dmz.h"
 #include <mach/mach.h>
 #include "front.h"
 #include <dirent.h>
@@ -44,6 +45,7 @@ static pthread_mutex_t g_path_lock = PTHREAD_MUTEX_INITIALIZER;
 static void path_unlock(pthread_mutex_t **m) { pthread_mutex_unlock(*m); }
 #define PATH_LOCK() pthread_mutex_t *path_guard __attribute__((cleanup(path_unlock))) = &g_path_lock; pthread_mutex_lock(path_guard)
 static uint8_t g_fmode[65536];              // fd → open mode
+static dmz *g_dmz[65536];                   // fd → its DMZ reader when the file is stored compressed (dmz.h: the IPA's RomFS); the game reads, sizes and lists the file it stands for
 static uint8_t g_fsave[65536];              // fd → whether it is on a transactional save mount (the save write injection point only counts these)
 static _Atomic int g_save_writes;           // number of writes on the save mount (shared by the injection point and the commit log)
 static _Atomic uint64_t g_txn_first_ns;     // time of this transaction's first save write (used by the commit log to report timing; cleared to 0 at commit)
@@ -511,6 +513,11 @@ HLE_FORCE("_ZN2nn2fs8OpenFileEPNS0_10FileHandleEPKci", "fsp-srv → open(2)", Re
     struct stat st; fstat(fd, &st);
     if (S_ISDIR(st.st_mode)) { close(fd); return RES_PATH_NOT_FOUND; }
     if (fd >= (int)sizeof g_fmode) die("fd beyond the table");
+    if (ro && !(mode & (MODE_WRITE | MODE_APPEND))) {   // read-only mounts only: a save file is always read as it is
+        dmz *z = dmz_open(fd);
+        if (!z && errno) { LOG("[RED] fs open %s: a damaged DMZ file (errno=%d)", hp, errno); close(fd); return RES_FAIL; }
+        g_dmz[fd] = z;
+    }
     g_fmode[fd] = (uint8_t)mode; *out = (uint64_t)fd;
     { const char *c = strchr(path, ':'); size_t ln = c ? (size_t)(c - path) : 0; g_fsave[fd] = 0;
       for (int i = 0; c && i < g_nmnt; i++) if (strlen(g_mnt[i].name) == ln && !strncmp(g_mnt[i].name, path, ln)) g_fsave[fd] = g_mnt[i].commit[0] != 0; }
@@ -523,8 +530,9 @@ HLE_FORCE("_ZN2nn2fs8ReadFileEPmNS0_10FileHandleElPvm", "fsp-srv → pread(2)", 
     if (!h) { *out = 0; return RES_FAIL; }   // a file handle is an fd; 0 is stdin and never a file the game opened: the null handle the game keeps using after a failed open
     size_t got = 0;
     dm_guest_write_prepare(buf, sz);   // The destination may be a texture pool page write-protected by the graphics layer: a kernel write to a read-only page returns EFAULT instead of page-faulting, so unprotect and mark dirty first
+    dmz *z = g_dmz[(int)h & 0xffff];
     while (got < sz) {
-        ssize_t r = pread((int)h, (uint8_t *)buf + got, sz - got, off + got);
+        ssize_t r = z ? (off < 0 ? (errno = EINVAL, -1) : dmz_pread(z, (uint8_t *)buf + got, sz - got, (uint64_t)(off + got))) : pread((int)h, (uint8_t *)buf + got, sz - got, off + got);
         if (r < 0) { if (errno == EINTR) continue;
             if (errno == EFAULT) {   // the destination is not writable host memory: say where, with the protection of its VM region
                 int e = errno; vm_address_t ra = (vm_address_t)((uint8_t *)buf + got); vm_size_t rs = 0; vm_region_basic_info_data_64_t vi; mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64; mach_port_t obj = MACH_PORT_NULL;
@@ -574,6 +582,7 @@ HLE_FORCE("_ZN2nn2fs9WriteFileENS0_10FileHandleElPKvmRKNS0_11WriteOptionE", "fsp
 }
 HLE_FORCE("_ZN2nn2fs11GetFileSizeEPlNS0_10FileHandleE", "fsp-srv → fstat(2)", Result, h_fs_GetFileSize, int64_t *out, uint64_t h) {
     if (!h) return RES_FAIL;
+    if (g_dmz[(int)h & 0xffff]) { *out = (int64_t)dmz_size(g_dmz[(int)h & 0xffff]); return RES_OK; }
     struct stat st; if (fstat((int)h, &st)) return err_res("fstat", "fd");
     *out = st.st_size; return RES_OK;
 }
@@ -587,6 +596,7 @@ HLE_FORCE("_ZN2nn2fs9FlushFileENS0_10FileHandleE", "fsp-srv; host writes are alr
 HLE_FORCE("_ZN2nn2fs9CloseFileENS0_10FileHandleE", "fsp-srv → close(2)", void, h_fs_CloseFile, uint64_t h) {
     if (!h) return;   // the null handle after a failed open (see ReadFile): do not touch fd 0
     g_fmode[(int)h & 0xffff] = 0; g_fsave[(int)h & 0xffff] = 0;
+    dmz_close(g_dmz[(int)h & 0xffff]); g_dmz[(int)h & 0xffff] = NULL;
     close((int)h); }
 HLE_FORCE("_ZN2nn2fs15GetFileOpenModeENS0_10FileHandleE", "fsp-srv; the open mode is recorded by the host", int, h_fs_GetFileOpenMode, uint64_t h) { return g_fmode[(int)h & 0xffff]; }
 
@@ -656,7 +666,13 @@ HLE_FORCE("_ZN2nn2fs12GetEntryTypeEPNS0_18DirectoryEntryTypeEPKc", "fsp-srv → 
 }
 
 // ---------- Directories ----------
-typedef struct { DIR *d; char path[1024]; DIR *od; char opath[1024]; DirectoryEntry *snap; int64_t nsnap, psnap; int mode; } dirh_t;
+typedef struct { DIR *d; char path[1024]; DIR *od; char opath[1024]; DirectoryEntry *snap; int64_t nsnap, psnap; int mode, ro; } dirh_t;
+// The size a listing reports: on a read-only mount a DMZ file is listed at the size of the file it stands for (dmz.h), as GetFileSize reports it
+static int64_t listed_size(int dfd, const char *name, int64_t size) {
+    if (size < DMZ_HEADER) return size;
+    int fd = openat(dfd, name, O_RDONLY); if (fd < 0) return size;
+    size = dmz_listed_size(fd, size); close(fd); return size;
+}
 static void dir_snapshot(dirh_t *h, const mount_t *m, const char *rest) {
     char *roots = strdup(m->overlay);
     char (*names)[0x301] = calloc(2048, sizeof *names);
@@ -686,14 +702,14 @@ static void dir_snapshot(dirh_t *h, const mount_t *m, const char *rest) {
         snprintf(rel, 2048, "%s/%s", rest, names[j]);
         if (!rom_overlay_path(m, rel, resolved, 1024)) continue;
         struct stat st;
-        if (!stat(resolved, &st)) { h->snap[j].type = S_ISDIR(st.st_mode) ? ENT_DIR : ENT_FILE; h->snap[j].size = S_ISDIR(st.st_mode) ? 0 : st.st_size; }
+        if (!stat(resolved, &st)) { h->snap[j].type = S_ISDIR(st.st_mode) ? ENT_DIR : ENT_FILE; h->snap[j].size = S_ISDIR(st.st_mode) ? 0 : listed_size(AT_FDCWD, resolved, st.st_size); }
     }
     free(resolved); free(rel); free(guest); free(parent); free(all); free(names); free(roots);
 }
 HLE_FORCE("_ZN2nn2fs13OpenDirectoryEPNS0_15DirectoryHandleEPKci", "fsp-srv → opendir(3)", Result, h_fs_OpenDirectory, uint64_t *out, const char *path, int mode) {
     HP(path); DIR *d = opendir(hp);
     if (!d) return err_res("opendir", hp);
-    dirh_t *h = calloc(1, sizeof *h); h->d = d; strlcpy(h->path, hp, sizeof h->path); h->mode = mode;
+    dirh_t *h = calloc(1, sizeof *h); h->d = d; strlcpy(h->path, hp, sizeof h->path); h->mode = mode; h->ro = ro;
     const char *c = strchr(path, ':');
     if (c) for (int i = 0; i < g_nmnt; i++) if (g_mnt[i].overlay[0] && strlen(g_mnt[i].name) == (size_t)(c - path) && !strncmp(g_mnt[i].name, path, (size_t)(c - path))) {
         dir_snapshot(h, &g_mnt[i], c + 1); break;
@@ -714,7 +730,7 @@ HLE_FORCE("_ZN2nn2fs13ReadDirectoryEPlPNS0_14DirectoryEntryENS0_15DirectoryHandl
         if (!(h->mode & (isdir ? DIRMODE_DIR : DIRMODE_FILE))) continue;
         DirectoryEntry *o = &ents[n++]; memset(o, 0, sizeof *o);
         if (!guest_name(h->path, e->d_name, o->name, sizeof o->name)) { char c[1280]; snprintf(c, sizeof c, "%s/%s", h->path, e->d_name); *count = n - 1; return err_res("directory name", c); }
-        o->type = isdir ? ENT_DIR : ENT_FILE; o->size = isdir ? 0 : st.st_size;
+        o->type = isdir ? ENT_DIR : ENT_FILE; o->size = isdir ? 0 : h->ro ? listed_size(dfd, e->d_name, st.st_size) : st.st_size;
     }
     *count = n; return RES_OK;
 }
