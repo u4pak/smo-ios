@@ -22,16 +22,40 @@ ASPECT = Fraction(239, 110)
 SCALE_X = Fraction(16, 9) / ASPECT
 EDGE_DX = 640 * (1 - float(SCALE_X))
 WIPES = frozenset({'WipeCircle', 'WipeMiss', 'WipeSkip', 'WipeResultGrand',
-                   'WipeWorldSelect', 'WipeWorldSelectCapture', 'WipeResultMain'})
+                   'WipeWorldSelect', 'WipeResultMain'})
 ROOT_EDGES = {name: (1 if values[2] > 0 else -1, values[1], values[2], values[3])
               for name, values in common.EDGE_ANCHORS.items() if values[2] != 0}
 # These measured static panes have different positions in this supplied version
 # from the upstream mod's literals. Their own animation channels are checked.
 CHILD_EDGES = {'ContinueLoading': {'ParLogo': (-510.0, 270.0)},
-               'Menu': {'List': (-590.0, -29.0), 'ParLogo': (-510.0, 270.0)}}
+               'Menu': {'List': (-590.0, -29.0), 'ParLogo': (-510.0, 270.0)},
+               # Drawn under the title menu: its logo must move with Menu's or
+               # both copies show side by side.
+               'BootLoading': {'ParLogo': (-510.0, 270.0)},
+               # The wardrobe's coin counters keep their distance from the panel's right edge.
+               'Closet': {'ParCounterT': (574.0, 313.0), 'ParCounterB': (574.0, -214.0)}}
+# The boot tooltip's strap is anchored to the 16:9 right edge and slides in from
+# beyond it: its position and every key of its slide move out to the panel's edge
+# together, so it starts off screen and ends against the true edge.
+STRAPS = {'BootLoading': {'PicStrap': (640.0, 0.0)}}
+STRAP_KEYS = frozenset({640.0, 980.0})
+# Pictures that fill the panel's width without stretching: wider, with the
+# texture cropped top and bottom by the same factor (the pane's height and its
+# children stay). The boot screen's Joy-Con picture.
+COVER_PICTURES = {'BootLoading': {'PicJoyCon': (-154.0, 380.0, 1280.0, 556.0)}}
+# Backgrounds scaled up uniformly until they cover the panel (no children).
+COVER_SCALED = {'ModeSelect': {'PicBase': (0.0, 160.0, 1600.0, 1600.0, struct.unpack('<f', struct.pack('<f', 0.8))[0])}}
 WIDE_BANDS = {'PlayGuide': {'PicBase': (0.0, -360.0, 1280.0, 280.0)},
+              'BootLoading': {'PicOtherCon': (-154.0, -360.0, 1280.0, 328.0)},
+              'ClosetHead': {'PicBGLightT': (0.0, 10.0, 1280.0, 350.0), 'PicBGLightB': (0.0, 10.0, 1280.0, 370.0),
+                             'PicBase': (0.0, 360.0, 1280.0, 148.0)},
+              'ClosetBody': {'PicBase': (0.0, -360.0, 1280.0, 190.0)},
               'TalkMessage': {'PicBase': (0.0, -360.0, 1280.0, 280.0)},
               'ContinueLoading': {'PicFooter': (0.0, -360.0, 1280.0, 58.0)}}
+# The shared footer part is narrowed by each parent's root. Widen only its bars,
+# not its button guides, so every footer reaches both panel edges.
+EMBEDDED_BANDS = {'FooterParts': {'PicBaseB': (0.0, 0.0, 1280.0, 58.0),
+                                  'PicBaseT': (0.0, 58.0, 1280.0, 4.0)}}
 PROGRESS_ANIM_SHA = 'e24fdce215dc90b1963362ce7723ca78b2fba75a4e5a33bdb585d0106d9d9c1b'
 
 
@@ -93,7 +117,7 @@ def patch_layout(data: bytes, label: str, records: list, tracks: list, aspect: F
     edge_dx = 640 * (1 - float(scale_x))
     order, index = panes(data, label)
     name = Path(label).stem
-    if name in common.SKIP:
+    if name in common.SKIP and name not in EMBEDDED_BANDS:
         records.append({'member': label, 'action': 'preserve_embedded_or_fullframe',
                         'source_sha256': common.sha(data)})
         return data
@@ -113,6 +137,22 @@ def patch_layout(data: bytes, label: str, records: list, tracks: list, aspect: F
         struct.pack_into(order + 'f', output, pos + relative, after)
         changes.append({'pane': pane, 'field': field, 'offset': pos + relative,
                         'before': before, 'after': struct.unpack_from(order + 'f', output, pos + relative)[0]})
+
+    def widen(pane, expected):
+        pos, tag = index[pane]
+        actual = struct.unpack_from(order + '2f', data, pos + 0x2c) + struct.unpack_from(order + '2f', data, pos + 0x4c)
+        if tag != b'pic1' or actual != expected or struct.unpack_from(order + '2f', data, pos + 0x44) != (1.0, 1.0):
+            raise ValueError(f'{label}: measured full-width surface {pane} changed')
+        static(pane, {8})
+        write(pane, 'width', 0x4c, 1280.0, 1280.0 / float(scale_x))
+
+    if name in EMBEDDED_BANDS:
+        for pane, expected in EMBEDDED_BANDS[name].items():
+            widen(pane, expected)
+        records.append({'member': label, 'action': 'phone_embedded_bands', 'source_sha256': common.sha(data),
+                        'output_sha256': common.sha(output), 'changes': changes,
+                        'animation_tracks_checked': len(tracks)})
+        return bytes(output)
 
     root, _ = index['RootPane']
     root_scale = struct.unpack_from(order + '2f', data, root + 0x44)
@@ -143,6 +183,12 @@ def patch_layout(data: bytes, label: str, records: list, tracks: list, aspect: F
         # Preserve edge distance in uniform UI pixels, including offscreen
         # authored positions. Animated ListPos remains wholly unchanged.
         write(pane, 'translation_x', 0x2c, x, x + math.copysign(edge_dx / float(scale_x), x))
+    for pane, (x, y) in STRAPS.get(name, {}).items():
+        pos, _ = index[pane]
+        if struct.unpack_from(order + '2f', data, pos + 0x2c) != (x, y):
+            raise ValueError(f'{label}: measured edge strap {pane} changed')
+        # Animated: patch_strap_animation moves its keys by the same distance.
+        write(pane, 'translation_x', 0x2c, x, x + edge_dx / float(scale_x))
     if name == 'ContinueLoading':
         # This is an actual horizontally travelling progress icon, not a fixed
         # corner HUD. Its authored range and progress-bar animation are expanded
@@ -167,16 +213,31 @@ def patch_layout(data: bytes, label: str, records: list, tracks: list, aspect: F
             raise ValueError(f'{label}: off-center/rotated full-frame pane {pane}')
         if struct.unpack_from(order + '4f', data, pos + 0x44) != (1.0, 1.0, 1280.0, 720.0):
             raise ValueError(f'{label}: unexpected full-frame surface dimensions')
-        static(pane, {6 if part else 8})
+        static(pane, {6, 7} if part else {8})
         write(pane, 'scale_x' if part else 'width', 0x44 if part else 0x4c,
               1.0 if part else 1280.0, (1.0 if part else 1280.0) / float(scale_x))
-    for pane, expected in WIDE_BANDS.get(name, {}).items():
+        if part:   # the save-screenshot background keeps its 16:9 shape: cover the panel, cropping top and bottom
+            write(pane, 'scale_y', 0x48, 1.0, 1.0 / float(scale_x))
+    for pane, expected in {**WIDE_BANDS.get(name, {}), **common.SCREEN_FILTERS.get(name, {})}.items():
+        widen(pane, expected)
+    for pane, expected in COVER_PICTURES.get(name, {}).items():
+        widen(pane, expected)
+        pos, _ = index[pane]
+        count = data[pos + 0x54 + 18]
+        coords = struct.unpack_from(order + '8f', data, pos + 0x54 + 20)
+        if count != 1 or coords != (0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0):
+            raise ValueError(f'{label}: unexpected texture coordinates on {pane}')
+        crop = (1 - float(scale_x)) / 2   # the texture's visible height shrinks as its width grows
+        for i, v in enumerate((crop, crop, 1 - crop, 1 - crop)):
+            write(pane, f'texcoord_v{i}', 0x54 + 20 + 8 * i + 4, coords[2 * i + 1], v)
+    for pane, (x, y, w, h, scale) in COVER_SCALED.get(name, {}).items():
         pos, tag = index[pane]
-        actual = struct.unpack_from(order + '2f', data, pos + 0x2c) + struct.unpack_from(order + '2f', data, pos + 0x4c)
-        if tag != b'pic1' or actual != expected or struct.unpack_from(order + '2f', data, pos + 0x44) != (1.0, 1.0):
-            raise ValueError(f'{label}: measured horizontal shade band changed')
-        static(pane, {8})
-        write(pane, 'width', 0x4c, 1280.0, 1280.0 / float(scale_x))
+        if tag != b'pic1' or struct.unpack_from(order + '2f', data, pos + 0x2c) != (x, y) or \
+                struct.unpack_from(order + '4f', data, pos + 0x44) != (scale, scale, w, h):
+            raise ValueError(f'{label}: measured cover background {pane} changed')
+        static(pane, {6, 7})
+        write(pane, 'scale_x', 0x44, scale, scale / float(scale_x))
+        write(pane, 'scale_y', 0x48, scale, scale / float(scale_x))
     records.append({'member': label, 'action': 'phone_widescreen', 'source_sha256': common.sha(data),
                     'output_sha256': common.sha(output), 'changes': changes,
                     'animation_tracks_checked': len(tracks)})
@@ -217,6 +278,33 @@ def patch_progress_animation(data: bytes, label: str, records: list, aspect: Fra
     return bytes(output)
 
 
+def patch_strap_animation(data: bytes, label: str, records: list, aspect: Fraction = ASPECT) -> bytes:
+    """Move the edge strap's x keys out to the panel edge; times and slopes stay."""
+    scale_x = wide_scale(aspect)
+    shift = 640 * (1 - float(scale_x)) / float(scale_x)
+    straps = STRAPS[Path(label).stem.split('_')[0]]
+    output, order, changes = bytearray(data), common.endian(data), []
+    for track in common.animation_tracks(data, label):
+        if track['target'] not in straps or track['kind'] != 'FLPA' or track['channel'] != 0:
+            continue
+        offset = track['offset']
+        _, _, curve, _, count, _, key_offset = struct.unpack_from(order + '4BHHI', data, offset)
+        if curve != 2 or not 0 < count <= 8 or offset + key_offset + count * 12 > len(data):
+            raise ValueError(f'{label}: unexpected strap key format')
+        for i in range(count):
+            pos = offset + key_offset + i * 12 + 4
+            value = struct.unpack_from(order + 'f', data, pos)[0]
+            if value not in STRAP_KEYS:
+                raise ValueError(f'{label}: unexpected strap position {value}')
+            struct.pack_into(order + 'f', output, pos, value + shift)
+            changes.append({'pane': track['target'], 'offset': pos, 'before': value,
+                            'after': struct.unpack_from(order + 'f', output, pos)[0]})
+    if changes:
+        records.append({'member': label, 'action': 'phone_edge_strap_animation', 'source_sha256': common.sha(data),
+                        'output_sha256': common.sha(output), 'changes': changes})
+    return bytes(output)
+
+
 def members(data: bytes, label: str) -> list[tuple[str, int, int]]:
     """Validate SARC named ranges once, retaining exact original member packing."""
     if len(data) < 40 or data[:4] != b'SARC' or data[6:8] not in (b'\xff\xfe', b'\xfe\xff'):
@@ -253,12 +341,15 @@ def patch_archive(data: bytes, label: str, records: list, depth=0, aspect: Fract
     output = bytearray(data)
     for name, lo, hi in ranges:
         body, child = data[lo:hi], label + '/' + name
+        body = common.patch_menu_member(name, body, child, records)
         if body[:4] == b'SARC':
             body = patch_archive(body, child, records, depth + 1, aspect)
         elif name.endswith('.bflyt'):
             body = patch_layout(body, child, records, tracks, aspect)
         elif name.endswith('ContinueLoading_ProgressBar.bflan'):
             body = patch_progress_animation(body, child, records, aspect)
+        elif name.endswith('.bflan') and Path(name).stem.split('_')[0] in STRAPS:
+            body = patch_strap_animation(body, child, records, aspect)
         elif body[:4] == b'Yaz0':
             raise ValueError(f'{child}: unexpected nested compression')
         if len(body) != hi - lo:
@@ -362,7 +453,7 @@ def prepare(args) -> dict:
             target.write_bytes(after)
             archives.append({'relative_path': str(path.relative_to(args.source_romfs)), 'source': str(path),
                              'destination': str(target), 'source_sha256': common.sha(before), 'output_sha256': common.sha(after)})
-    if len(archives) != 209:
+    if len(archives) != 211:
         raise ValueError(f'unexpected changed layout archive count {len(archives)}')
     camera = prepare_camera(args.rewritten, args.output / 'patched', args.feedback_source)
     profile = prepare_profile(args.profile, args.output / 'profiles' / TITLE)

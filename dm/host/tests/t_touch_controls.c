@@ -6,7 +6,7 @@ static int checks;
 #define CHECK(c) do { ++checks; if (!(c)) { fprintf(stderr,"failed line %d: %s\n",__LINE__,#c); return 1; } } while (0)
 static int near(double a,double b) { return fabs(a-b)<.000001; }
 int main(void) {
-    CHECK(DM_TC_VERSION==6);
+    CHECK(DM_TC_VERSION==8);
     CHECK(near(DM_TC_IDLE_ALPHA,.06)&&near(DM_TC_PRESSED_ALPHA,.18));
     CHECK(near(DM_TC_TEXT_ALPHA,.32)&&near(DM_TC_RING_ALPHA,.025));
     CHECK(!strcmp(DM_TC_GEAR_SYMBOL,"gearshape")&&DM_TC_GEAR_ICON_SIZE==20&&DM_TC_GEAR_REGULAR_WEIGHT);
@@ -34,9 +34,63 @@ int main(void) {
         CHECK(l.dpad.x+DM_TC_DPAD_R*l.unit<l.face.x-(DM_TC_FACE_GAP+DM_TC_FACE_R)*l.unit);
         CHECK(l.left_stick.x-DM_TC_STICK_R*l.unit>=0);
         CHECK(l.face.x+(DM_TC_FACE_GAP+DM_TC_FACE_R)*l.unit<=sizes[n][0]);
+        // The moped pedal and jump button stay inside the diamond's footprint, apart.
+        dm_tc_rect pedal=dm_tc_pedal(l); dm_tc_point jump=dm_tc_jump(l); double reach=(DM_TC_FACE_GAP+DM_TC_FACE_R)*l.unit;
+        CHECK(pedal.x+pedal.width<=l.face.x+reach+.000001&&pedal.y>=l.face.y-reach-.000001&&pedal.y+pedal.height<=l.face.y+reach+.000001);
+        CHECK(jump.x-DM_TC_JUMP_R*l.unit>=l.face.x-reach-.000001&&jump.y+DM_TC_JUMP_R*l.unit<=l.face.y+reach+.000001);
+        CHECK(jump.x+DM_TC_JUMP_R*l.unit<pedal.x);
     }
     CHECK(dm_tc_make_layout(NAN,440,(dm_tc_insets){0}).unit==0);
-    CHECK(dm_tc_make_layout(440,0,(dm_tc_insets){0}).unit==0);
+    // Swipe-to-look on cameras that read only a stick: each swipe's distance is a
+    // turn budget the right stick drains, so short, fast and released swipes still
+    // turn by their whole length.
+    {
+        const uint64_t frame=UINT64_C(16666667);
+        const double slack=DM_TC_LOOK_DONE+DM_TC_LOOK_FLOOR*DM_TC_LOOK_SPEED*frame/1e9;   // the last frame keeps the floor
+        dm_tc_look l={0}; double x,y,turned=0,first=0; uint64_t t=UINT64_C(1000000000); int frames=0;
+        dm_tc_look_begin(&l,(dm_tc_point){500,200},t);
+        dm_tc_look_step(&l,t,&x,&y); CHECK(x==0&&y==0&&dm_tc_look_active(&l));   // touching, nothing swiped yet
+        for (int i=1;i<=4;i++) dm_tc_look_move(&l,(dm_tc_point){500+i*50.0,200},1);   // 200 pt right in one fast flick
+        dm_tc_look_release(&l);
+        while (dm_tc_look_active(&l)&&frames<600) {
+            t+=frame; dm_tc_look_step(&l,t,&x,&y);
+            if (!frames) first=x;
+            CHECK(x>=0&&x<=1&&fabs(y)<.000001&&(x==0||x>=DM_TC_LOOK_FLOOR-.000001));
+            turned+=x*DM_TC_LOOK_SPEED*frame/1e9; ++frames;
+        }
+        CHECK(near(first,1)&&fabs(turned-200)<slack&&frames<60);   // full tilt, then the swipe's distance
+        dm_tc_look_step(&l,t+frame,&x,&y); CHECK(x==0&&y==0&&!dm_tc_look_active(&l));
+        // A tiny flick still clears the dead zone and finishes its distance.
+        dm_tc_look_begin(&l,(dm_tc_point){500,200},t); dm_tc_look_move(&l,(dm_tc_point){510,200},1); dm_tc_look_release(&l);
+        turned=0; frames=0;
+        while (dm_tc_look_active(&l)&&frames<600) { t+=frame; dm_tc_look_step(&l,t,&x,&y); CHECK(x==0||x>=DM_TC_LOOK_FLOOR-.000001); turned+=x*DM_TC_LOOK_SPEED*frame/1e9; ++frames; }
+        CHECK(fabs(turned-10)<slack&&frames>=1);
+        // Up is positive; scale is the layout unit; a new swipe adds to the rest.
+        dm_tc_look_begin(&l,(dm_tc_point){500,300},t); dm_tc_look_move(&l,(dm_tc_point){500,200},2);
+        CHECK(near(l.dy,-50)); t+=frame; dm_tc_look_step(&l,t,&x,&y); CHECK(fabs(x)<.000001&&y>0);
+        double rest=l.dy; dm_tc_look_release(&l);
+        dm_tc_look_begin(&l,(dm_tc_point){500,300},t); dm_tc_look_move(&l,(dm_tc_point){500,280},2); CHECK(near(l.dy,rest-10));
+        // A stalled frame turns at most one capped step; cancel drops everything.
+        double before=hypot(l.dx,l.dy); dm_tc_look_step(&l,t+UINT64_C(1000000000),&x,&y);
+        CHECK(before-hypot(l.dx,l.dy)<=DM_TC_LOOK_SPEED*DM_TC_LOOK_MAX_STEP+.000001);
+        dm_tc_look_cancel(&l); dm_tc_look_step(&l,t+UINT64_C(2000000000),&x,&y); CHECK(x==0&&y==0&&!dm_tc_look_active(&l));
+        dm_tc_look_begin(&l,(dm_tc_point){NAN,0},t); CHECK(!dm_tc_look_active(&l));
+        dm_tc_look_begin(&l,(dm_tc_point){0,0},t); dm_tc_look_move(&l,(dm_tc_point){INFINITY,0},1); dm_tc_look_move(&l,(dm_tc_point){10,0},0);
+        CHECK(l.dx==0&&l.dy==0);
+        // Direct turns: a sample's distance (unit already divided by the sensitivity)
+        // goes to the camera and leaves the stick budget alone; nothing is taken
+        // from a released, non-finite or unscaled sample.
+        double dx,dy;
+        dm_tc_look_cancel(&l); dm_tc_look_begin(&l,(dm_tc_point){500,300},t);
+        CHECK(dm_tc_look_take(&l,(dm_tc_point){530,290},2/dm_tc_look_sensitivity(2),&dx,&dy)&&near(dx,30)&&near(dy,-10));
+        CHECK(l.dx==0&&l.dy==0&&l.last.x==530);
+        CHECK(near(dx*DM_TC_LOOK_DEGREES,9));   // 30 points at sensitivity 2 and unit 2: nine degrees
+        CHECK(!dm_tc_look_take(&l,(dm_tc_point){NAN,0},1,&dx,&dy)&&dx==0&&dy==0);
+        CHECK(!dm_tc_look_take(&l,(dm_tc_point){540,290},0,&dx,&dy)&&l.last.x==530);
+        dm_tc_look_release(&l); CHECK(!dm_tc_look_take(&l,(dm_tc_point){600,290},1,&dx,&dy)&&dx==0);
+        CHECK(dm_tc_look_sensitivity(1)==1&&dm_tc_look_sensitivity(0)==1&&dm_tc_look_sensitivity(NAN)==1);
+        CHECK(dm_tc_look_sensitivity(10)==DM_TC_LOOK_SENS_MAX&&dm_tc_look_sensitivity(.01)==DM_TC_LOOK_SENS_MIN);
+    }
     dm_tc_layout phone=dm_tc_make_layout(956,440,(dm_tc_insets){0,62,21,62});
     CHECK(near(phone.left_stick.x,31+81*phone.unit));
     CHECK(near(phone.left_stick.y,419-82*phone.unit));

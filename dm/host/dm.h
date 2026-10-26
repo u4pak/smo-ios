@@ -61,8 +61,19 @@ uint64_t gate_dispatch(uint64_t ret_addr, uint64_t *regs);
 // Observation gates (rewriter OBS table; numbering matches patch_nso.py): read-only callbacks, called on a gate hit once attached
 enum { OBS_MOVIE_RING_LINK = 19, OBS_MOVIE_RING_UNLINK = 20,
        OBS_ODYSSEY_PROJECTION_SET = 21, OBS_ODYSSEY_PROJECTION_CALC = 22,
-       OBS_MAX = 23 }; // Registered exact-build observations; no run-time text writes.
+       OBS_ODYSSEY_CAMERA_YAW_ENTER = 23, OBS_ODYSSEY_CAMERA_YAW_EXIT = 24, OBS_ODYSSEY_CAMERA_PITCH = 25,
+       OBS_ODYSSEY_UI_DECIDE = 26, OBS_ODYSSEY_UI_REPEAT_UP = 27, OBS_ODYSSEY_UI_REPEAT_DOWN = 28,
+       OBS_ODYSSEY_UI_LEFT_STICK = 29, OBS_ODYSSEY_UI_CANCEL = 30, OBS_ODYSSEY_UI_MAP_CLOSE = 31,
+       OBS_ODYSSEY_UI_LIST_CLOSE = 32, OBS_ODYSSEY_UI_PAUSE = 33, OBS_ODYSSEY_UI_TAB_PREV = 34,
+       OBS_ODYSSEY_UI_TAB_NEXT = 35, OBS_ODYSSEY_UI_TAB_CHANGE = 36,   // result gates (patch_nso.py RETS): the callback may answer for the function
+       OBS_ODYSSEY_UI_DEMO = 37, OBS_ODYSSEY_UI_RIDE = 38,               // observations
+       OBS_ODYSSEY_UI_PAD_HANDHELD = 39, OBS_ODYSSEY_UI_CLOSET_LEFT = 40, OBS_ODYSSEY_UI_CLOSET_RIGHT = 41,
+       OBS_ODYSSEY_UI_CLOSET_CAPS = 42, OBS_ODYSSEY_UI_CLOSET_OUTFITS = 43, OBS_ODYSSEY_UI_Y = 44,
+       OBS_ODYSSEY_UI_RIGHT_STICK = 45, OBS_ODYSSEY_UI_REPEAT_RIGHT = 46, OBS_ODYSSEY_UI_REPEAT_LEFT = 47,
+       OBS_ODYSSEY_UI_TRIGGER_RIGHT = 48, OBS_ODYSSEY_UI_TRIGGER_LEFT = 49,   // result gates
+       OBS_MAX = 50 }; // Registered exact-build observations; no run-time text writes.
 void gate_obs_set(int id, void (*fn)(const uint64_t *regs));
+void gate_ret_set(int id, void (*fn)(uint64_t *regs));   // result gates: may set regs[16] = 1 and regs[0] to answer for the function
 int gate_obs_present(int id);
 uint64_t now_ns(void);
 uint64_t guest_ns(void);              // Guest clock (hle_os.c; does not advance while frozen, guest_clock_freeze)
