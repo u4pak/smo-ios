@@ -2,7 +2,7 @@
 
 <img align="right" src="https://i.imgur.com/gtpqfNR.jpeg" alt="Mario riding a moped" width="400">
 
-A touch-first native iOS port of Super Mario Odyssey with optimizations, custom controls, and more.
+A touch-first native iOS port of Super Mario Odyssey with optimizations, custom controls, and more with **zero emulation**.
 
 ###### *Disclaimer: This repo does not include any of the required game files or prod.keys needed for a build. Dump them from your own Switch.*
 
