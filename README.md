@@ -1,28 +1,53 @@
 # Super Mario Odyssey for iPhone and iPad
 
-[![Source checks](https://github.com/NicholasDominici/super-mario-odyssey-ios/actions/workflows/checks.yml/badge.svg)](https://github.com/NicholasDominici/super-mario-odyssey-ios/actions/workflows/checks.yml)
+**smo-ios** · a touch-first native iOS port by [Connor Hutchinson](https://github.com/u4pak)
 
-Super Mario Odyssey running natively on Apple Silicon, with Metal graphics,
-touch controls, physical controller motion, and DualSense haptics and adaptive
-triggers. No JIT or jailbreak. Built on [nxnative](https://github.com/seedds/nxnative).
+Super Mario Odyssey running natively on Apple Silicon iPhones and iPads, with
+Metal graphics, touch controls made for a phone, physical controller motion,
+and DualSense haptics and adaptive triggers. No JIT or jailbreak.
+
+smo-ios is built off of
+[NicholasDominici/super-mario-odyssey-ios](https://github.com/NicholasDominici/super-mario-odyssey-ios),
+which runs the game on [nxnative](https://github.com/seedds/nxnative). That
+port brought the native runtime, the 4:3 iPad and Duo views, controller motion
+and haptics, and iCloud saves. smo-ios makes the game play like an iPhone game,
+fit any iPhone or iPad screen, and fit on the device in about half the space.
 
 Provide your own **base game, update 1.4.1, and console keys**. The build tools
 prepare everything locally on your Mac. This repository contains the port's
 source and tools; it does not contain Nintendo assets.
 
-I've been playing on an **iPad Pro 13-inch (M5)** and **iPhone 17 Pro Max** on
-iPadOS/iOS 27. Picture, sound, controls, motion and the main controller effects
-have been tested in gameplay. [Installation](#install-it-yourself)
+I play on an **iPhone 18 Pro**; the original port was tested on an **iPad Pro
+13-inch (M5)** and an **iPhone 17 Pro Max**. [Installation](#install-it-yourself)
 
-## What this adds
+## What smo-ios adds
+
+- **Touch-first play.** Swipe the right half of the screen to turn the camera.
+  Tap menus, dialogue choices, shops, the wardrobe, the map and kingdom select
+  directly. **Back** and menu-action buttons appear where the controller guide
+  used to be, cutscenes skip with a tap, and the moped gets a big pedal and a
+  jump button.
+- **A clean screen.** Touch controls stay hidden in menus, loading screens and
+  cutscenes, and controller hints that touch play doesn't need are hidden too.
+  With a controller, the touch controls fade away and return on your next touch.
+- **Your exact screen.** Display presets for every iPhone and iPad that runs
+  iOS 26, at each model's native aspect, with the map icons, menu footers,
+  coin counter, Moe-Eye glasses filter, menu cursors and title logo fixed for
+  wide screens.
+- **About half the download.** The IPA is 3.46 GB instead of 6.32 GB, in about
+  5,000 files instead of 71,000. Game files are stored with zstd and read back
+  by the app, most textures are capped at 512 px (skies, Mario and the globe
+  keep 1024) and movies are re-encoded. [Details](docs/VALIDATION.md)
+- **No dead ends.** Balloon World (online only) shows a clear message, and the
+  VR and Action Guide menu items, which can't work here, are gone.
+
+## From the original port
 
 - A **4:3 iPad view** with corrected camera projection, HUD, dialogue backgrounds
   and screen transitions. Mario and circular icons keep their proportions.
 - A separate **239:110 iPhone view**, matched to the tested iPhone 17 Pro Max.
 - **Live Duo layouts** in the 4:3-prepared build: camera, HUD, safe areas and
   controls adapt together through landscape folding without restarting the game.
-- **Per-model display presets** for iPhone and iPad models that run iOS 26, using
-  each model's native resolution from [ios-resolution.com](https://www.ios-resolution.com).
 - **Shake-to-throw Cappy**, using a compatible physical controller's motion sensors.
 - The game's original left/right vibration patterns, translated to controller haptics.
 - **PS5 DualSense support**, with independent handle haptics and adaptive trigger feedback for supported game events.
@@ -234,7 +259,7 @@ proof of gameplay performance or how a physical controller feels.
 
 ## Reporting bugs
 
-[Open an issue](https://github.com/NicholasDominici/super-mario-odyssey-ios/issues)
+[Open an issue](https://github.com/u4pak/smo-ios/issues)
 with your device, OS version, port commit, game version, display preset and what
 you were doing. The app's `log.txt` and diagnostics are in its Files folder.
 Remove account/device details before posting; don't attach game files, keys,
@@ -242,6 +267,10 @@ saves or provisioning profiles.
 
 ## Credits
 
+- [NicholasDominici/super-mario-odyssey-ios](https://github.com/NicholasDominici/super-mario-odyssey-ios):
+  the port smo-ios is built off of: the Odyssey profile and display preparation,
+  the iPad and Duo views, controller motion and haptics, iCloud saves and the
+  build, signing and install tools.
 - [seedds/nxnative](https://github.com/seedds/nxnative): native runtime, offline
   code rewriting, graphics translation, build tooling, and the original game profile.
 - [ly05010419/MacNativeGames](https://github.com/ly05010419/MacNativeGames): work
@@ -282,8 +311,8 @@ Allow about **40 GB free on the Mac** for game files, caches and packaging and
 2. **Download the source and prepare Python.** Open Terminal and run:
 
    ```sh
-   git clone https://github.com/NicholasDominici/super-mario-odyssey-ios.git
-   cd super-mario-odyssey-ios
+   git clone https://github.com/u4pak/smo-ios.git
+   cd smo-ios
    python3 -m venv .venv
    source .venv/bin/activate
    python -m pip install -r requirements.txt
