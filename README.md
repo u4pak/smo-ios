@@ -1,202 +1,20 @@
-# Super Mario Odyssey for iPhone and iPad
+# smo-ios
 
-**smo-ios** · a touch-first native iOS port by [Connor Hutchinson](https://github.com/u4pak)
+A touch-first native iOS port of Super Mario Odyssey
 
-Super Mario Odyssey running natively on Apple Silicon iPhones and iPads, with
-Metal graphics, touch controls made for a phone, physical controller motion,
-and DualSense haptics and adaptive triggers. No JIT or jailbreak.
+Built off of [NicholasDominici/super-mario-odyssey-ios](https://github.com/NicholasDominici/super-mario-odyssey-ios)
 
-smo-ios is built off of
-[NicholasDominici/super-mario-odyssey-ios](https://github.com/NicholasDominici/super-mario-odyssey-ios),
-which runs the game on [nxnative](https://github.com/seedds/nxnative). That
-port brought the native runtime, the 4:3 iPad and Duo views, controller motion
-and haptics, and iCloud saves. smo-ios makes the game play like an iPhone game,
-fit any iPhone or iPad screen, and fit on the device in about half the space.
+###### *Disclaimer: This repo does not include any of the required game files or prod.keys needed for a build. Dump them from your own Switch.*
 
-Provide your own **base game, update 1.4.1, and console keys**. The build tools
-prepare everything locally on your Mac. This repository contains the port's
-source and tools; it does not contain Nintendo assets.
+## Features
 
-I play on an **iPhone 18 Pro**; the original port was tested on an **iPad Pro
-13-inch (M5)** and an **iPhone 17 Pro Max**. [Installation](#install-it-yourself)
-
-## What smo-ios adds
-
-- **Touch-first play.** Swipe the right half of the screen to turn the camera.
-  Tap menus, dialogue choices, shops, the wardrobe, the map and kingdom select
-  directly. **Back** and menu-action buttons appear where the controller guide
-  used to be, cutscenes skip with a tap, and the moped gets a big pedal and a
-  jump button.
-- **A clean screen.** Touch controls stay hidden in menus, loading screens and
-  cutscenes, and controller hints that touch play doesn't need are hidden too.
-  With a controller, the touch controls fade away and return on your next touch.
-- **Your exact screen.** Display presets for every iPhone and iPad that runs
-  iOS 26, at each model's native aspect, with the map icons, menu footers,
-  coin counter, Moe-Eye glasses filter, menu cursors and title logo fixed for
-  wide screens.
-- **About half the download.** The IPA is 3.46 GB instead of 6.32 GB, in about
-  5,000 files instead of 71,000. Game files are stored with zstd and read back
-  by the app, most textures are capped at 512 px (skies, Mario and the globe
-  keep 1024) and movies are re-encoded. [Details](docs/VALIDATION.md)
-- **No dead ends.** Balloon World (online only) shows a clear message, and the
-  VR and Action Guide menu items, which can't work here, are gone.
-
-## From the original port
-
-- A **4:3 iPad view** with corrected camera projection, HUD, dialogue backgrounds
-  and screen transitions. Mario and circular icons keep their proportions.
-- A separate **239:110 iPhone view**, matched to the tested iPhone 17 Pro Max.
-- **Live Duo layouts** in the 4:3-prepared build: camera, HUD, safe areas and
-  controls adapt together through landscape folding without restarting the game.
-- **Shake-to-throw Cappy**, using a compatible physical controller's motion sensors.
-- The game's original left/right vibration patterns, translated to controller haptics.
-- **PS5 DualSense support**, with independent handle haptics and adaptive trigger feedback for supported game events.
-- Optional **up to 120 displayed FPS** through frame interpolation on supported
-  devices.
-- Private **iCloud save sync**, under your own developer team's container.
-
-## Controls
-
-Connect a controller in **Settings → Bluetooth**, before or during play. The
-game switches to it as soon as it connects, hiding the touch controls, and
-returns to touch controls when it disconnects.
-
-Use the sticks to move and look, the face buttons to jump/throw Cappy, and
-L2/R2 to crouch or roll. Shake the controller for
-motion actions. Touch controls are available too; adaptive triggers require
-the appropriate controller.
-
-Tap the top-center **gear** to open Settings. A drag, cancelled touch or
-second gear finger stays consumed without pressing a game control. VoiceOver
-also offers **Open settings**. The gear remains available with a controller.
-The full Odyssey touch layout always includes the D-pad, alongside the fixed
-left stick and Nintendo face diamond. Swipe anywhere in the right half of the
-screen (away from the buttons) to turn the camera, like a 3D mobile game: the
-normal follow camera turns with your finger directly, without the right stick's
-dead zone or easing, by an amount set with **Swipe look sensitivity** in
-Settings. Cameras that only read a stick (some special scenes) still turn by a
-right-stick turn the length of the swipe. Swipe-to-look only applies to touch
-controls; a controller's right stick works as usual.
-
-Menus and screens can be tapped directly, and each tap is handled by the
-game's own menu code (same highlight, sounds and animations as a button press):
-
-- **Title and pause menus**: tap **Resume**, **Resume 2P**, **New Game**,
-  **Options** or the pause menu's items to choose them.
-- **Options and their sub-menus**: tap a row to choose it. On setting rows,
-  tap the left or right side to step the value that way.
-- **Confirmation windows** (save, load, delete, language and similar): tap an
-  answer.
-- **Dialogue**: tap anywhere to continue instead of pressing A; when an NPC
-  offers choices (including the Odyssey's "Head off to another kingdom?"),
-  tap one.
-- **Kingdom select**: tap a kingdom on the strip to turn the globe to it; tap
-  the selected kingdom to travel.
-- **Map**: drag to scroll the map (at a gentle speed); tap a checkpoint or other icon to center on it the way the cursor
-  snaps to icons, then tap it again to use it. Tap the left or right half of
-  the tab bar at the top to switch between the map, moons, captures and other
-  collection lists.
-- **Shops**: tap an item to scroll to it (the shop shows its description and
-  price as usual); tap the selected item to buy it.
-- **Moon/music/capture/souvenir lists, save-data confirmations, mode select
-  and mini-game menus**: tap an item to choose it.
-- **Wardrobe**: tap an outfit or cap to scroll to it and try it on (tapping
-  the other row switches rows first); tap the item you're trying on to wear it.
-- **Race results**: tap anywhere to continue.
-- **Cutscenes**: the touch controls stay hidden and the skip hint reads **Tap
-  anywhere to Skip** (English text) while you use touch. Cutscenes that show the
-  hint right away skip with one tap; the ones that wait for a button show it on
-  the first tap and skip on the second.
-- **Info messages**: tap anywhere to continue.
-
-Actions that a menu only lists in its bottom controller guide get their own
-buttons in the bottom-right corner while you use touch: **Lists** (map and
-kingdom select), zoom in/out (map; hold), **Reset** (option settings) and
-**Random** (wardrobe).
-
-Screens whose way out is the B button get a **Back** button in the top-left
-corner while you use touch (options, the map, kingdom select, shops, lists,
-the wardrobe, confirmations and the pause menu). Any screen the port doesn't
-recognize brings the controls back after about two seconds, so you are never
-left without a way to navigate.
-
-On the moped, the face buttons become a big **pedal** (accelerate, like Y; it
-tilts back while held) and a smaller **up-arrow** button (jump, like B). While
-you use touch, the moped's on-screen hint shows the same pedal and arrow
-pictures in place of the Y and B icons, switching as you go between touch and
-a controller; controller names in the game's hints read **Controller /
-Device** (English text) instead of Pro Controller.
-
-The touch controls stay hidden from launch, through loading and on these
-screens, and fade in once the in-game HUD is up. In the touch layout the **+**
-and **−** buttons show pause and map symbols. Controller hints that touch play
-doesn't need (the button guide at the bottom of menus and the flashing button
-icon in dialogue and confirmation windows) are hidden while you use touch and
-come back when a controller connects or you press one of its buttons. This
-needs a prepared phone or 4:3 build; plain 16:9 builds keep the controls
-visible and the hints in place as before.
-
-The frame-rate counter sits in the safe-area top-left on iPhone and iPad. Tap
-it to hide its text; tap the same corner again to reveal it. Other gameplay
-touches stay active. The app remembers visibility, and generated presentation
-keeps the FG marker. The player confirmed hide/reveal working on the M5 iPad
-in the current build; the new phone package remains pending installation.
-
-Settings has four switches, **Gyro**, **Device haptics**, **Also with
-controller** and **Touch controls with controller**, and a **Swipe look
-sensitivity** slider (0.25× to 3×, default 1×, stored on the device).
-**Touch controls with controller** keeps the on-screen controls (and
-swipe-to-look) usable while a controller is connected; it is on by default.
-With it on, the drawings fade out while the controller is in use and come back
-with the next touch, which still presses what it lands on. Gyro On uses Auto, preferring fresh controller motion and
-falling back to iPhone/iPad sensors. Off disables motion. Existing calibration
-and controller feedback are preserved. The player reports iPhone device gyro
-working; other orientations, handoffs and iPad gyro need their own checks.
-
-Device haptics On follows native rumble and guarded gameplay events through a
-separate finite phone sink. **Also with controller** controls only device
-vibration; it does not change controller vibration or adaptive triggers.
-Unsupported devices show **Unavailable on this device** and remain quiet. The
-tested iPad has no built-in actuator. Bullet Bill capture is a felt-positive
-native baseline. Build18's extra cues were physically rejected as too strong
-and buzzing. Build19 uses lower-strength, sharp one-shot haptic transients for
-confirmed in-game events; input edges never generate a cue. Strong native
-rumble takes priority, and held or duplicate events cannot renew a tap. Its
-physical feel is pending a new phone check. It covers guarded normal jumps/landings, long jumps/backflips,
-cap throws, standard coins and ground pounds. Special actor variants are not
-implied. Advanced stored preferences are retained without extra menu sections.
-
-Existing stored frame-interpolation preferences are retained, and
-`DM_FRAMEGEN` environment overrides keep precedence. The settings sheet
-adds no display menu. No setting changes the game's 60 Hz simulation.
+- **On-screen controls.** Custom control system designed to allow full gameplay without a physical controller
+- **About half the download.** The entire base game was optimized for mobile devices, resulting in a **3.46 GB full install** instead of 6.32 GB. [Details](docs/VALIDATION.md)
+- **Mod support.** *(Coming Soon)* Custom kingdoms, clothes, and more, all easily installed with the click of a button (or two)
 
 ## Display and performance
 
-Choose `--preset ipad` or `--preset duo` for the **4:3 preparation with live
-landscape adaptation from 1:1 through 16:9**. Both produce a universal app with
-the same guarded camera/HUD path; `duo` makes the intended target explicit.
-Actual scene geometry and safe insets drive folding, rather than the phone/tablet
-device name. The separate `--preset iphone` retains the **239:110** preparation
-for the tested iPhone 17 Pro Max; use the Duo preset for a Duo.
-
-You can also pass your iPhone or iPad model, such as `--preset iphone-16-pro` or
-`--preset ipad-air-6th-gen-11`; the model name as listed, in quotes, works too.
-Run `python tools/odyssey.py --list-presets` to see every model. iPad models
-select the same live 4:3 build as `--preset ipad`, which fits the real screen at
-runtime; `--preset iphone-duo` is the same as `--preset duo`. iPhone models are
-wider than 16:9, so they build a static camera/HUD preparation at that model's
-exact native aspect. Model names and resolutions come from
-[ios-resolution.com](https://www.ios-resolution.com) and are kept in
-[tools/ios_displays.tsv](tools/ios_displays.tsv). The build doesn't detect your
-device, so choose the model you'll install on. Of the iPhone shapes, only 239:110
-(iPhone 17 Pro Max) has been tested in gameplay.
-
-The live path is enabled by default only after both exact-build camera and HUD
-guards pass. Unsupported preparations or geometry keep proportional composition.
-`DM_ODYSSEY_DYNAMIC_DISPLAY=0` is a diagnostic opt-out. See
-[display transitions](docs/DISPLAY-TRANSITIONS.md) for source, frame ownership and
-evidence limits. The observed Duo gameplay uses a labeled Mac-backed Simulator
-preview; physical Duo execution and performance are untested.
+Each build is customized to whatever display you have using `--preset`. GUI and HUD elements are adapted to fit nicely inside whatever aspect ratio your device uses.
 
 The internal raster remains **1600 × 900**. Full-screen aspect does not mean
 native display-pixel rendering. On the tested ProMotion devices the FPS overlay
@@ -205,15 +23,6 @@ doesn't double physics speed or mean the GPU renders 120 original game frames.
 Interpolation can introduce visual artifacts and latency and falls back when
 unsupported. Use `--frame-generation off` to turn it off, or `--show-fps` to see
 the counter. See [validation and limitations](docs/VALIDATION.md).
-
-## Unsupported features
-
-Balloon World needs Nintendo's online service, which this port doesn't have.
-Talking to Luigi shows a single message saying it isn't supported yet, instead
-of offering to connect. That message is in English in every game language.
-
-The title and pause menus leave out **Playing in VR** and **Action Guide**,
-which don't work in this port. The remaining items close up in their place.
 
 ## Saves and updates
 
@@ -229,34 +38,6 @@ on both devices. Saves upload in the background after completed game commits;
 there is no permanent sync button. Cloud imports happen before the game boots.
 Use one device at a time and close it before switching.
 
-An iPad-to-iPhone handoff has been verified. Some later phone save captures
-failed intermittently; a tested interrupted-read fix and better diagnostics are
-included, but its live follow-up and reverse handoff remain unverified. Keep
-local backups and treat cloud sync as experimental.
-
-## Building and contributing
-
-The supported inputs are the base game (**NSP or XCI**) plus **update 1.4.1 (`v393216`)**,
-title ID `0100000000010000`. The tools check exact module hashes/build IDs and
-reject other versions. [Input details and extracted-folder support](docs/INPUTS.md)
-cover the same files used for the tested builds.
-
-The player-facing entry point is `tools/odyssey.py`. It uses the shared runtime
-in `dm/`, the exact-build profile in `dm/games/0100000000010000/`, and structural
-HUD preparation in `tools/prepare_odyssey_*.py`. All extracted files, rewritten
-game modules, shader caches, signing profiles and IPAs stay outside the checkout.
-
-Run checks without any game files:
-
-```sh
-python3 tools/check.py
-```
-
-For changes to binary observers, shaders or rendering, see
-[AGENTS.md](AGENTS.md), [CLAUDE.md](CLAUDE.md) and the
-[runtime development guide](docs/development.md). A source test passing is not
-proof of gameplay performance or how a physical controller feels.
-
 ## Reporting bugs
 
 [Open an issue](https://github.com/u4pak/smo-ios/issues)
@@ -265,36 +46,22 @@ you were doing. The app's `log.txt` and diagnostics are in its Files folder.
 Remove account/device details before posting; don't attach game files, keys,
 saves or provisioning profiles.
 
-## Credits
+Do not create an issue asking about any of these features:
+- Balloon World
+- amiibo
+- VR Mode
 
-- [NicholasDominici/super-mario-odyssey-ios](https://github.com/NicholasDominici/super-mario-odyssey-ios):
-  the port smo-ios is built off of: the Odyssey profile and display preparation,
-  the iPad and Duo views, controller motion and haptics, iCloud saves and the
-  build, signing and install tools.
-- [seedds/nxnative](https://github.com/seedds/nxnative): native runtime, offline
-  code rewriting, graphics translation, build tooling, and the original game profile.
-- [ly05010419/MacNativeGames](https://github.com/ly05010419/MacNativeGames): work
-  used by nxnative; its license and notices are retained.
-- [fayaz12g/smo-aar](https://github.com/fayaz12g/smo-aar/tree/e8fd670d1faeab3d8c4904177928bcfd14afb42c):
-  the aspect-ratio approach, reimplemented here with structural archive checks.
-- [Ryujinx and the other dependencies](dm/third_party/README.md): shader
-  translation, codecs, headers and utilities, under their respective licenses.
+## Build and Install
 
-Port source is MIT; see [LICENSE](LICENSE) and [source provenance](docs/PROVENANCE.md).
-This is an unofficial fan project. Super Mario Odyssey and its game content
-belong to Nintendo. The game and its assets are not covered by this source license.
+### Requirements:
+- **Xcode 27** or newer
+- iPhone / iPad on **iOS 26** or newer
+- **SMO game files**, either NSP or XCI
+- Switch **prod.keys** file
+- **Apple Developer Account**, a free one will do
 
-## Install it yourself
-
-You don't need Codex, Claude, or another AI assistant. You need an Apple Silicon
-Mac, **Xcode 27 or newer**, an iPhone/iPad on **iOS/iPadOS 26 or newer**, your own
-game files and keys, and a developer account capable of signing with
-**Increased Memory Limit**. The tested signing path uses a paid Apple Developer
-team. Free-account sideloading and lower-memory devices haven't been validated.
-Allow about **40 GB free on the Mac** for game files, caches and packaging and
-**12 GB on the device** for installation headroom; actual requirements vary.
-
-1. **Prepare the Mac.** Install and open Xcode, accept its license, and sign in
+### Install
+1. **Prepare your Mac.** Install and open Xcode, accept its license, and sign in
    under **Xcode → Settings → Apple Accounts**. Select that Xcode under
    **Settings → Locations → Command Line Tools**. Install
    [Homebrew](https://brew.sh/) if you don't already have it, then run:
@@ -336,12 +103,9 @@ Allow about **40 GB free on the Mac** for game files, caches and packaging and
      --output "$HOME/Games/Odyssey-ipad-unsigned.ipa"
    ```
 
-   For the tested iPhone 17 Pro Max layout, change `--preset ipad` to
-   `--preset iphone`. For a Duo, use `--preset duo`. For another model, pass its
-   name from `python tools/odyssey.py --list-presets`, such as
-   `--preset iphone-16-pro`. Use a different output filename for each preparation. The first build takes
+   For the tested iPhone 18 Pro layout, change `--preset ipad` to
+   `--preset iPhone-18-pro`. Use a different output filename for each preparation. The first build takes
    longer because it prepares shaders. The last line prints the IPA's path.
-   That IPA contains your game files; keep it private.
 
 5. **Connect and prepare the device.** Connect it by USB, unlock it and tap
    **Trust**. Enable **Settings → Privacy & Security → Developer Mode**, then
@@ -366,8 +130,49 @@ Allow about **40 GB free on the Mac** for game files, caches and packaging and
    Merely tapping an IPA in Files doesn't install it; development builds run only
    on devices allowed by their profile, and must be renewed when signing expires.
 
-7. **Open Super Mario Odyssey and play.** Pair your controller, choose Start or
+7. **Open Super Mario Odyssey and play.** Choose Start or
    Continue, and test movement, sound and a few jumps. When updating later, make
    an in-game save, fully close the app, back up its `save` folder, and repeat
    steps 4–6 with the same bundle ID and signing team. Optional iCloud setup is
    in [docs/ICLOUD.md](docs/ICLOUD.md).
+
+## Contributing
+
+The supported inputs are the base game (**NSP or XCI**) plus **update 1.4.1 (`v393216`)**,
+title ID `0100000000010000`. [Input details and extracted-folder support](docs/INPUTS.md)
+cover the same files used for the tested builds.
+
+The player-facing entry point is `tools/odyssey.py`. It uses the shared runtime
+in `dm/`, the exact-build profile in `dm/games/0100000000010000/`, and structural
+HUD preparation in `tools/prepare_odyssey_*.py`. All extracted files, rewritten
+game modules, shader caches, signing profiles and IPAs stay outside the checkout.
+
+Run checks without any game files:
+
+```sh
+python3 tools/check.py
+```
+
+For changes to binary observers, shaders or rendering, see
+[AGENTS.md](AGENTS.md), [CLAUDE.md](CLAUDE.md) and the
+[runtime development guide](docs/development.md). A source test passing is not
+proof of gameplay performance or how a physical controller feels.
+
+## Credits
+
+- [NicholasDominici/super-mario-odyssey-ios](https://github.com/NicholasDominici/super-mario-odyssey-ios):
+  Odyssey profile and display preparation,
+  the iPad and Duo views, controller motion and haptics, iCloud saves and the
+  build, signing and install tools.
+- [seedds/nxnative](https://github.com/seedds/nxnative): native runtime, offline
+  code rewriting, graphics translation, build tooling, and the original game profile.
+- [ly05010419/MacNativeGames](https://github.com/ly05010419/MacNativeGames): work
+  used by nxnative; its license and notices are retained.
+- [fayaz12g/smo-aar](https://github.com/fayaz12g/smo-aar/tree/e8fd670d1faeab3d8c4904177928bcfd14afb42c):
+  the aspect-ratio approach, reimplemented here with structural archive checks.
+- [Ryujinx and the other dependencies](dm/third_party/README.md): shader
+  translation, codecs, headers and utilities, under their respective licenses.
+
+Port source is MIT; see [LICENSE](LICENSE) and [source provenance](docs/PROVENANCE.md).
+This is an unofficial fan project. Super Mario Odyssey and its game content
+belong to Nintendo. The game and its assets are not covered by this source license.
