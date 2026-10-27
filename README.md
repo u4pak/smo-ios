@@ -1,13 +1,11 @@
 # smo-ios
 
-A touch-first native iOS port of Super Mario Odyssey
-
-Built off of [NicholasDominici/super-mario-odyssey-ios](https://github.com/NicholasDominici/super-mario-odyssey-ios)
+A touch-first native iOS port of Super Mario Odyssey with optimizations, custom controls, and more.
 
 ###### *Disclaimer: This repo does not include any of the required game files or prod.keys needed for a build. Dump them from your own Switch.*
 
 ## Features
-<img align="right" src="https://i.imgur.com/gtpqfNR.jpeg" alt="Mario riding a moped" width="400">
+<img align="left" src="https://i.imgur.com/gtpqfNR.jpeg" alt="Mario riding a moped" width="400">
 
 - **On-screen controls.** Custom control system designed to allow full gameplay without a physical controller
 - **About half the download.** The entire base game was optimized for mobile devices, resulting in a **3.46 GB full install** instead of 6.32 GB. [Details](docs/VALIDATION.md)
