@@ -55,6 +55,13 @@ int main(void) {
     uint8_t zz[4096]; memcpy(zz, z, zl); zz[zl / 2] ^= 0x55;
     const uint8_t *d4[] = {zz, payload + 4096}; build(DMZ_VIEW_PAYLOAD, 5000, 5000, NULL, 2, d4, l1, c1); put(rom, "flip.bin");
     build(DMZ_VIEW_PAYLOAD, 5000, 5000, NULL, 2, d1, l1, c1); put(save, "game.sav"); size_t save_len = flen;
+    // a zstd chunk, written out by hand: frame magic, single-segment header with a 2-byte content size (4096 - 256), one last RLE block of 4096 bytes of 'z' (block header: 4096 << 3 | RLE << 1 | last)
+    static const uint8_t rle[] = {0x28, 0xb5, 0x2f, 0xfd, 0x60, 0x00, 0x0f, 0x03, 0x80, 0x00, 'z'};
+    static uint8_t tail[100]; memset(tail, 't', sizeof tail);
+    const uint8_t *d6[] = {rle, tail}; size_t l6[] = {sizeof rle, 100}; uint8_t c6[] = {DMZ_ZSTD, DMZ_STORED};
+    build(DMZ_VIEW_PAYLOAD, 4196, 4196, NULL, 2, d6, l6, c6); put(rom, "zstd.bin");
+    static uint8_t bad[sizeof rle]; memcpy(bad, rle, sizeof rle); bad[0] = 0x29;
+    const uint8_t *d7[] = {bad, tail}; build(DMZ_VIEW_PAYLOAD, 4196, 4196, NULL, 2, d7, l6, c6); put(rom, "zstdbad.bin");
     // the RomFS is fixed once mounted (the host keeps a name index per folder), so every file is written first
     CHECK(h_fs_MountRom("rom", NULL, 0) == RES_OK && h_fs_MountSave("save", NULL) == RES_OK, "mount rom and save");
     uint8_t b[6000]; size_t got = 0;
@@ -63,6 +70,10 @@ int main(void) {
     CHECK(!read_at("rom:/plain.bin", 4000, 200, b, &got) && got == 200 && !memcmp(b, payload + 4000, 200), "a read across the LZFSE chunk into the stored one");
     CHECK(!read_at("rom:/plain.bin", 4990, 100, b, &got) && got == 10 && !memcmp(b, payload + 4990, 10), "a read past the end stops at 5000 (10 bytes)");
     CHECK(!read_at("rom:/raw.txt", 0, 64, b, &got) && got == 8 && !memcmp(b, "raw file", 8) && size_of("rom:/raw.txt") == 8, "any other file reads as it is");
+
+    static uint8_t zw[4196]; memset(zw, 'z', 4096); memset(zw + 4096, 't', 100);
+    CHECK(!read_at("rom:/zstd.bin", 4000, 150, b, &got) && got == 150 && !memcmp(b, zw + 4000, 150), "a read across a zstd chunk (4096 bytes of z from one RLE block) into a stored one");
+    CHECK(read_at("rom:/zstdbad.bin", 0, 10, b, &got) < 0, "a zstd chunk that is not a zstd frame fails the read");
 
     // (2) Yaz0 view of "ABCDEFGHIJ" behind a header with alignment 0x2000: header, ff ABCDEFGH, ff IJ = 28 bytes
     uint8_t want[28]; memcpy(want, yaz0, 16); memcpy(want + 16, "\xff" "ABCDEFGH" "\xff" "IJ", 12);

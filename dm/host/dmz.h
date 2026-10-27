@@ -4,7 +4,7 @@
 // Layout, little endian:
 //   0x00 "DMZ1"   0x04 u8 view (0 payload, 1 Yaz0 literals)   0x05 u8 chunk size log2   0x06 u16 0   0x08 u32 chunk count   0x0c u32 0
 //   0x10 u64 payload size   0x18 u64 view size   0x20 the original Yaz0 header (16 bytes; zeros for view 0)
-//   0x30 u64 file offset of each chunk, then the end of the last one (count + 1)   then u8 codec of each chunk (0 stored, 1 LZFSE), padded to 8   then the chunks
+//   0x30 u64 file offset of each chunk, then the end of the last one (count + 1)   then u8 codec of each chunk (0 stored, 1 LZFSE, 2 zstd), padded to 8   then the chunks
 #pragma once
 #include <stddef.h>
 #include <stdint.h>
@@ -13,7 +13,7 @@
 #define DMZ_MAGIC "DMZ1"
 #define DMZ_HEADER 0x30
 enum { DMZ_VIEW_PAYLOAD = 0, DMZ_VIEW_YAZ0 = 1 };
-enum { DMZ_STORED = 0, DMZ_LZFSE = 1 };
+enum { DMZ_STORED = 0, DMZ_LZFSE = 1, DMZ_ZSTD = 2 };   // zstd: the decoder in dm/third_party/zstd
 
 typedef struct dmz dmz;
 // The view size of a Yaz0-literal view of n payload bytes: header, then one control byte (0xff) before every 8 bytes

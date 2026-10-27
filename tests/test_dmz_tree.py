@@ -2,6 +2,7 @@
 from pathlib import Path
 import os
 import platform
+import shutil
 import struct
 import subprocess
 import sys
@@ -11,6 +12,9 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tests'))
 from test_touch_glyphs import yaz0
+from test_texcap import BC1, bntx
+
+ZSTD = subprocess.run(['brew', '--prefix', 'zstd'], capture_output=True, text=True).stdout.strip() if shutil.which('brew') else ''
 
 
 def literal_view(header: bytes, data: bytes) -> bytes:
@@ -18,20 +22,21 @@ def literal_view(header: bytes, data: bytes) -> bytes:
     return header + b''.join(b'\xff' + data[i:i + 8] for i in range(0, len(data), 8))
 
 
-@unittest.skipUnless(platform.system() == 'Darwin', 'LZFSE (libcompression) is Apple-only')
+@unittest.skipUnless(platform.system() == 'Darwin' and ZSTD and Path(ZSTD, 'lib/libzstd.a').is_file(), 'needs macOS (libcompression) and Homebrew zstd')
 class DmzTreeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.temp = tempfile.TemporaryDirectory()
         cls.tool = Path(cls.temp.name) / 'dmz'
-        subprocess.run(['xcrun', 'clang', '-O2', '-o', cls.tool, ROOT / 'dm/tools/dmz.c', ROOT / 'dm/host/dmz.c', '-lcompression'], check=True)
+        subprocess.run(['xcrun', 'clang', '-O2', '-I', Path(ZSTD, 'include'), '-o', cls.tool, ROOT / 'dm/tools/dmz.c', ROOT / 'dm/host/dmz.c',
+                        Path(ZSTD, 'lib/libzstd.a'), '-lcompression'], check=True)
 
     @classmethod
     def tearDownClass(cls):
         cls.temp.cleanup()
 
-    def tree(self, src, dst):
-        out = subprocess.run([sys.executable, ROOT / 'dm/tools/dmz_tree.py', self.tool, src, dst, '--suffix', '.szs:.bfstm'],
+    def tree(self, src, dst, *extra):
+        out = subprocess.run([sys.executable, ROOT / 'dm/tools/dmz_tree.py', self.tool, src, dst, '--suffix', '.szs:.bfstm', *extra],
                              capture_output=True, text=True, check=True).stdout
         return out
 
@@ -52,7 +57,7 @@ class DmzTreeTests(unittest.TestCase):
             (src / 'noise.bfstm').write_bytes(noise)
             (src / 'movie.mp4').write_bytes(b'movie')
             first = self.tree(src, dst)
-            self.assertIn('2 of 3 files', first)   # the random stream does not shrink
+            self.assertIn('2 of 3 files made smaller', first)   # the random stream does not shrink
             self.assertEqual(self.cat(dst / 'ObjectData/Stage.szs'), literal_view(original[:16], archive))
             self.assertLess((dst / 'ObjectData/Stage.szs').stat().st_size, len(original))
             self.assertEqual(self.cat(dst / 'music.bfstm'), stream)
@@ -62,13 +67,41 @@ class DmzTreeTests(unittest.TestCase):
             self.assertTrue(Path(str(dst) + '.json').is_file())
             packed = (dst / 'music.bfstm').stat().st_mtime_ns
             again = self.tree(src, dst)
-            self.assertIn('(0 this run)', again)
+            self.assertIn('(0 this run', again)
             self.assertEqual((dst / 'music.bfstm').stat().st_mtime_ns, packed)
             (src / 'music.bfstm').write_bytes(stream[::-1])
             (src / 'movie.mp4').unlink()
-            self.assertIn('(1 this run)', self.tree(src, dst))
+            self.assertIn('(1 this run', self.tree(src, dst))
             self.assertEqual(self.cat(dst / 'music.bfstm'), stream[::-1])
             self.assertFalse((dst / 'movie.mp4').exists())
+
+    def test_textures_are_capped_by_rule(self):
+        with tempfile.TemporaryDirectory() as temp:
+            src, dst = Path(temp) / 'RomFS', Path(temp) / 'mirror'
+            for d in ('ObjectData', 'LayoutData'): (src / d).mkdir(parents=True)
+            archive, b, where = bntx([('Ground_alb', BC1, 1024, 1024, 11, 4, 1)])
+            for name in ('ObjectData/Ground.szs', 'ObjectData/SkyDay.szs', 'LayoutData/Menu.szs'):
+                (src / name).write_bytes(yaz0(bytes(archive)))
+            out = self.tree(src, dst, '--tex-max', '256', '--tex-rule', 'LayoutData/*=0', '--tex-rule', 'ObjectData/Sky*=512')
+            self.assertIn('2 textures capped', out)
+            def size_of(name):
+                view = self.cat(dst / name)
+                data = bytearray(view[16:])   # a literal Yaz0 view: drop the control byte before every 8 bytes
+                payload = b''.join(data[i + 1:i + 9] for i in range(0, len(data), 9))
+                return struct.unpack_from('<ii', payload, b + where[0][0] + 0x24)
+            self.assertEqual(size_of('ObjectData/Ground.szs'), (256, 256))
+            self.assertEqual(size_of('ObjectData/SkyDay.szs'), (512, 512))
+            self.assertEqual(size_of('LayoutData/Menu.szs'), (1024, 1024))
+            self.assertIn('(0 this run', self.tree(src, dst, '--tex-max', '256', '--tex-rule', 'LayoutData/*=0', '--tex-rule', 'ObjectData/Sky*=512'))
+            self.assertIn('(1 this run', self.tree(src, dst, '--tex-max', '128', '--tex-rule', 'LayoutData/*=0', '--tex-rule', 'ObjectData/Sky*=512'))   # a new default redoes only the archive it applies to
+
+    def test_a_mirror_onto_its_source_is_refused(self):
+        with tempfile.TemporaryDirectory() as temp:
+            (Path(temp) / 'RomFS').mkdir()
+            for dst in ('romfs', 'RomFS/out'):   # the same folder on a case-insensitive volume, and a folder inside the source
+                result = subprocess.run([sys.executable, ROOT / 'dm/tools/dmz_tree.py', self.tool, Path(temp) / 'RomFS', Path(temp) / dst, '--suffix', '.szs'],
+                                        capture_output=True, text=True)
+                self.assertIn('overlap', result.stderr)
 
     def test_a_damaged_archive_stops_the_mirror(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -99,19 +99,27 @@ with open(sys.argv[1], 'wb') as f:
 PYMETA
 fi
 rm -rf "$APP/msl" "$O/Payload" "$O/out.ipa"   # (the last two: what the copy-and-zip packing left behind)
-# Size (profile keys ipa_romfs_pack / ipa_shader_bundle, dm/host/dmz.h): RomFS files with the listed suffixes go in as DMZ, chunked LZFSE the host's file layer reads back as the original
-# (a Yaz0 archive as a Yaz0 stream over its decompressed bytes), mirrored in $W/build/ios/romfs (dm/tools/dmz_tree.py; reruns repack only changed files, the rest are hard links);
-# the shader libraries go in as one bundle file DmIOS.app/msl/<folder>.dmz. Every DMZ file is read back through the host's reader and compared before it is used
-PACK=$(python3 "$DM/games/game.py" "$GAME" ipa_romfs_pack 2> /dev/null); BUNDLE=$(python3 "$DM/games/game.py" "$GAME" ipa_shader_bundle 2> /dev/null)
-if [ -n "$PACK$BUNDLE" ]; then DMZ=$O/dmz; cc -O2 -o "$DMZ" "$DM/tools/dmz.c" "$DM/host/dmz.c" -lcompression || die "build dm/tools/dmz.c"; fi
+# Size (profile keys ipa_*, dm/host/dmz.h): RomFS files with the listed suffixes go in as DMZ, chunked zstd the host's file layer reads back as the original (a Yaz0 archive as a
+# Yaz0 stream over its decompressed bytes), mirrored in $W/build/ios/romfs (dm/tools/dmz_tree.py; reruns redo only changed files, the rest are hard links); before packing, archive
+# textures are capped (ipa_texture_max, per-path ipa_texture_rules; dm/tools/texcap.py) and movies re-encoded (ipa_movie_crf). The shader libraries go in as one bundle file
+# DmIOS.app/msl/<folder>.dmz. Every DMZ file is read back through the host's reader and compared before it is used. zstd's encoder comes from Homebrew (brew install zstd)
+gk() { python3 "$DM/games/game.py" "$GAME" "$1" 2> /dev/null; }   # an optional profile key (empty when the profile has none)
+PACK=$(gk ipa_romfs_pack); BUNDLE=$(gk ipa_shader_bundle); TEXMAX=$(gk ipa_texture_max); TEXRULES=$(gk ipa_texture_rules); CRF=$(gk ipa_movie_crf)
+if [ -n "$PACK$BUNDLE" ]; then
+  ZP=$(brew --prefix zstd 2> /dev/null); [ -f "$ZP/lib/libzstd.a" ] || die "no zstd encoder library (brew install zstd)"
+  DMZ=$O/dmz; cc -O2 -I"$ZP/include" -o "$DMZ" "$DM/tools/dmz.c" "$DM/host/dmz.c" "$ZP/lib/libzstd.a" -lcompression || die "build dm/tools/dmz.c"
+fi
 P=Payload/DmIOS.app; MAPS=("$P=$APP")
 if [ "$BUNDLE" = on ]; then
-  t "bundle the shader libraries ($MSL_IOS/$MSLDIR)"; "$DMZ" bundle -c 18 "$O/$MSLDIR.dmz" "$MSL_IOS/$MSLDIR" || die "dmz bundle"
+  SIG="$(cd "$MSL_IOS/$MSLDIR" && ls -lT | shasum | cut -c1-40) $(shasum "$DM/tools/dmz.c" "$DM/host/dmz.c" | cut -c1-40 | tr '\n' ' ')"   # names, sizes and times of the libraries, and the tool
+  if [ -f "$O/$MSLDIR.dmz" ] && [ "$(cat "$O/$MSLDIR.dmz.sig" 2> /dev/null)" = "$SIG" ]; then t "shader library bundle unchanged ($O/$MSLDIR.dmz)"
+  else t "bundle the shader libraries ($MSL_IOS/$MSLDIR)"; rm -f "$O/$MSLDIR.dmz.sig"; "$DMZ" bundle -c 18 "$O/$MSLDIR.dmz" "$MSL_IOS/$MSLDIR" || die "dmz bundle"; echo "$SIG" > "$O/$MSLDIR.dmz.sig"; fi
   MAPS+=("$P/msl/$MSLDIR.dmz=$O/$MSLDIR.dmz")
 else MAPS+=("$P/msl/$MSLDIR=$MSL_IOS/$MSLDIR"); fi
 if [ -n "$AOC" ] && [ -d "$AOC" ]; then MAPS+=("$P/aoc=$AOC"); t "add-on content: $(ls "$AOC" | tr '\n' ' ')"; fi
 if [ -n "$PACK" ]; then
-  t "pack the RomFS ($PACK)"; python3 "$DM/tools/dmz_tree.py" "$DMZ" "$ROMFS" "$W/build/ios/romfs" --suffix "$PACK" || die "dmz_tree"
+  TREE=(--suffix "$PACK"); [ -n "$TEXMAX" ] && TREE+=(--tex-max "$TEXMAX"); for r in $TEXRULES; do TREE+=(--tex-rule "$r"); done; [ -n "$CRF" ] && TREE+=(--movie-crf "$CRF")
+  t "pack the RomFS ($PACK${TEXMAX:+, textures capped at $TEXMAX}${CRF:+, movies at CRF $CRF})"; python3 "$DM/tools/dmz_tree.py" "$DMZ" "$ROMFS" "$W/build/ios/romfs" "${TREE[@]}" || die "dmz_tree"
   MAPS+=("$P/romfs=$W/build/ios/romfs")
 else MAPS+=("$P/romfs=$ROMFS"); fi
 t "pack IPA (already-compressed game files stored, everything else deflated)"

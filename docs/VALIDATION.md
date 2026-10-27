@@ -283,28 +283,46 @@
     distance from the right edge.
   - The first sighting of each drawn layout is logged, for screens that still
     lack taps.
-- Smaller IPA (unit tests, pack-time read-back and a Mac boot comparison; not
+- Smaller IPA (unit tests, pack-time read-back and Mac boot comparisons; not
   yet installed on a device):
   - RomFS archives, music streams and sound archives go in as DMZ files
-    (`dm/host/dmz.h`): 1 MiB chunks of LZFSE, Apple's own codec on iOS, read
-    back by the host's file layer. An archive the game would Yaz0-decode is
-    presented as a Yaz0 stream of literals over its decompressed bytes, behind
-    its original header: sead's `SZSDecompressor` (streaming, `0x97d5c0`, and
-    the parallel loader, `0x97df50`) sizes its buffers by the header's size and
-    alignment, never by the file's. 5.50 GB of such files take 4.51 GB
-    (archives 4.16 → 3.42, streams 1.10 → 0.88). Movies don't shrink and stay
-    as they are.
-  - The 66,471 iOS shader libraries and reflection files (590 MB) go in as one
-    211 MB bundle, `DmIOS.app/msl/<folder>.dmz`; installs no longer copy and
-    hash tens of thousands of small files.
+    (`dm/host/dmz.h`): 2 MiB chunks of zstd level 19 (decoder vendored in
+    `dm/third_party/zstd`), read back by the host's file layer. An archive the
+    game would Yaz0-decode is presented as a Yaz0 stream of literals over its
+    decompressed bytes, behind its original header: sead's `SZSDecompressor`
+    (streaming, `0x97d5c0`, and the parallel loader, `0x97df50`) sizes its
+    buffers by the header's size and alignment, never by the file's.
+  - Archive textures over 512 pixels lose their top mip levels in place
+    (`dm/tools/texcap.py`): the smaller levels move to where level 0 was, the
+    header gets the new size, level count, block height and image size, and the
+    freed bytes are zeroed, so no container changes size. Only 2D single-layer
+    textures with mips whose level pointers and image size match the computed
+    Tegra layout exactly are changed; all 2,382 such textures over 512 pixels in
+    the object and effect archives matched. UI and text archives are left
+    alone; skies, Mario and the world-map globe keep 1024; the full-screen
+    kingdom maps have no mips and keep their size. 2,247 textures are capped.
+  - Movies are re-encoded (H.264 CRF 26, AAC 128 kb/s; same size, frame rate,
+    2 s keyframes and B-frame depth) and kept only when they decode to the same
+    number of frames: 237 MB → 43 MB.
+  - RomFS files 5.74 GB → 3.23 GB (archives 4.16 → 2.12, streams 1.10 → 0.86,
+    movies 0.24 → 0.04). The 66,471 iOS shader libraries and reflection files go
+    in as one bundle, `DmIOS.app/msl/<folder>.dmz`.
   - Every packed file is read back through the host's reader and compared with
-    the original before it is used (a Yaz0 view is decoded as Yaz0). The full
-    RomFS packs in about 10 s. `t_dmz` (ASan/UBSan) checks views, sizes,
-    listings, damaged files and bundle lookups against hand-written bytes.
-  - On the Mac the game booted to the first-launch screen from the packed
-    RomFS and shader bundle exactly as from the originals: the same 103 files
-    opened in the same order, no red lines, the same packaged textures, frame
-    4200 reached. Install time, load times and play on a phone are untested.
+    its payload before it is used (a Yaz0 view is decoded as Yaz0). `t_dmz`
+    (ASan/UBSan) checks views, sizes, listings, zstd and LZFSE chunks, damaged
+    files and bundle lookups against hand-written bytes; `test_texcap` checks the
+    layout against offsets read from the game and the in-place move on synthetic
+    BNTX files; `test_dmz_tree` checks rules, reruns and refusal of a mirror onto
+    its own source.
+  - On the Mac (LZFSE round) the game booted to the first-launch screen from the
+    packed RomFS and shader bundle exactly as from the originals: the same 103
+    files in the same order, no red lines. With zstd, capped textures and the
+    zstd shader bundle, a scripted run through mode select into the opening
+    cutscene captured the same eight frames as the originals with no red lines;
+    close-ups of Bowser and Peach render correctly, slightly softer.
+  - Odyssey iPhone 18 Pro IPA: 6.32 GB / 71,530 entries → 3.46 GB / 5,059
+    (3.5 GB installed). Install time, load times and play on a phone are
+    untested.
 - Controllers are picked up when they connect, become current, or finish
   attaching their gamepad profile (short re-checks after a connect), and input
   switches back to touch when they disconnect. **Touch controls with

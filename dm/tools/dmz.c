@@ -1,11 +1,16 @@
 // Write DMZ files (dm/host/dmz.h) on the Mac, for the IPA: every file written is read back through the host's own reader (dm/host/dmz.c) and compared before it counts.
-//   dmz pack [-c log2] <in> <out>     one file; a Yaz0 original gets the Yaz0 view over its decompressed bytes (checked by decoding the view as Yaz0), any other file the payload view
+//   dmz pack [-c log2] [--payload <p>] <in> <out>
+//                                     one file; a Yaz0 original gets the Yaz0 view over its decompressed bytes (checked by decoding the view as Yaz0), any other file the payload view.
+//                                     --payload: the payload is file <p>, an edited copy of the decompressed original (dm/tools/texcap.py); <in> gives only the Yaz0 header
+//   dmz decode <in>                   the decompressed bytes of a Yaz0 file (any other file as it is) to stdout
 //   dmz bundle [-c log2] <out> <dir>  the regular files of <dir> in one payload view behind a name index (dmz_bundle_* in dmz.h): the iOS shader libraries
 //   dmz cat <in>                      the view to stdout
-// Chunks are LZFSE (libcompression, also on iOS), compressed in parallel; a chunk LZFSE does not shrink is stored. Exit status 0 = written and checked.
-// Build: cc -O2 -o dmz dm/tools/dmz.c dm/host/dmz.c -lcompression
+// Chunks are zstd level 19 (DMZ_LEVEL overrides; DMZ_CODEC=lzfse for Apple's LZFSE), compressed in parallel; a chunk that does not shrink is stored. Exit status 0 = written and checked.
+// Build (zstd's encoder from Homebrew, its decoder from dm/third_party/zstd through dm/host/dmz.c):
+//   cc -O2 -I$(brew --prefix zstd)/include -o dmz dm/tools/dmz.c dm/host/dmz.c $(brew --prefix zstd)/lib/libzstd.a -lcompression   (its zstd.h is the same 1.5.7)
 #include "../host/dmz.h"
 #include <compression.h>
+#include <zstd.h>
 #include <dirent.h>
 #include <dispatch/dispatch.h>
 #include <errno.h>
@@ -56,12 +61,15 @@ static void write_dmz(const char *out, const uint8_t *payload, uint64_t n, int v
     uint8_t **data = calloc(count + 1, sizeof *data); size_t *len = calloc(count + 1, sizeof *len); uint8_t *codec = calloc(count + 8, 1);
     if (!data || !len || !codec) die("out of memory for %s", out);
     __block int failed = 0;
+    const char *ce = getenv("DMZ_CODEC"), *le = getenv("DMZ_LEVEL"); int lzfse = ce && !strcmp(ce, "lzfse"), level = le ? atoi(le) : 19;
     dispatch_apply((size_t)count, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^(size_t i) {
         uint64_t at = i * chunk, k = n - at < chunk ? n - at : chunk;
         uint8_t *z = malloc(k);
-        size_t c = z ? compression_encode_buffer(z, k - 1, payload + at, k, NULL, COMPRESSION_LZFSE) : 0;   // at most k - 1 bytes: a chunk that does not shrink is stored
+        size_t c = 0;   // at most k - 1 bytes: a chunk that does not shrink is stored
+        if (z && lzfse) c = compression_encode_buffer(z, k - 1, payload + at, k, NULL, COMPRESSION_LZFSE);
+        else if (z && k > 1) { c = ZSTD_compress(z, k - 1, payload + at, k, level); if (ZSTD_isError(c)) c = 0; }
         if (!z) { failed = 1; return; }
-        if (c) { data[i] = z; len[i] = c; codec[i] = DMZ_LZFSE; }
+        if (c) { data[i] = z; len[i] = c; codec[i] = lzfse ? DMZ_LZFSE : DMZ_ZSTD; }
         else { free(z); data[i] = (uint8_t *)payload + at; len[i] = k; codec[i] = DMZ_STORED; }
     });
     if (failed) die("out of memory compressing %s", out);
@@ -78,7 +86,7 @@ static void write_dmz(const char *out, const uint8_t *payload, uint64_t n, int v
     int ok = fwrite(h, 1, DMZ_HEADER + table + codecs, f) == DMZ_HEADER + table + codecs;
     for (uint64_t i = 0; ok && i < count; i++) ok = fwrite(data[i], 1, len[i], f) == len[i];
     if (fclose(f) || !ok) die("cannot write %s", tmp);
-    for (uint64_t i = 0; i < count; i++) if (codec[i] == DMZ_LZFSE) free(data[i]);
+    for (uint64_t i = 0; i < count; i++) if (codec[i] != DMZ_STORED) free(data[i]);
     free(data); free(len); free(codec); free(h);
 
     int fd = open(tmp, O_RDONLY); dmz *z = fd < 0 ? NULL : dmz_open(fd);
@@ -100,17 +108,27 @@ static void write_dmz(const char *out, const uint8_t *payload, uint64_t n, int v
 
 static int name_cmp(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
 int main(int argc, char **argv) {
-    int log2 = 20, a = 2;
+    int log2 = 21, a = 2;
     if (argc > 3 && !strcmp(argv[2], "-c")) { log2 = atoi(argv[3]); a = 4; }
     if (log2 < 12 || log2 > 24) die("chunk size log2 %s out of range (12 to 24)", argc > 3 ? argv[3] : "");
+    const char *edited = NULL;
+    if (argc > a + 1 && !strcmp(argv[1], "pack") && !strcmp(argv[a], "--payload")) { edited = argv[a + 1]; a += 2; }
     if (argc == a + 2 && !strcmp(argv[1], "pack")) {
         size_t n; uint8_t *src = slurp(argv[a], &n);
         if (n >= 16 && !memcmp(src, "Yaz0", 4)) {
-            size_t m; uint8_t *d = yaz0_decode(src, n, &m);
+            size_t m; uint8_t *d = edited ? slurp(edited, &m) : yaz0_decode(src, n, &m);
             if (!d) die("%s is a damaged Yaz0 stream", argv[a]);
+            if (edited && m != be32(src + 4)) die("the edited payload %s is not the size the Yaz0 header gives", edited);   // the header (decompressed size, alignment) is the original's
             write_dmz(argv[a + 1], d, m, DMZ_VIEW_YAZ0, src, log2); free(d);
-        } else write_dmz(argv[a + 1], src, n, DMZ_VIEW_PAYLOAD, NULL, log2);
+        } else if (edited) { size_t m; uint8_t *d = slurp(edited, &m); write_dmz(argv[a + 1], d, m, DMZ_VIEW_PAYLOAD, NULL, log2); free(d); }
+        else write_dmz(argv[a + 1], src, n, DMZ_VIEW_PAYLOAD, NULL, log2);
         free(src); return 0;
+    }
+    if (argc == 3 && !strcmp(argv[1], "decode")) {
+        size_t n, m; uint8_t *src = slurp(argv[2], &n), *d = n >= 16 && !memcmp(src, "Yaz0", 4) ? yaz0_decode(src, n, &m) : (m = n, src);
+        if (!d) die("%s is a damaged Yaz0 stream", argv[2]);
+        if (fwrite(d, 1, m, stdout) != m || fflush(stdout)) die("cannot write the decoded %s", argv[2]);
+        return 0;
     }
     if (argc == a + 2 && !strcmp(argv[1], "bundle")) {   // payload: DMZ_BUNDLE_MAGIC, count, names size, 0, entries {u64 offset, u64 size, u32 name offset, u32 name length} by name, names, then the files 16-aligned
         DIR *d = opendir(argv[a + 1]); if (!d) die("cannot open %s", argv[a + 1]);
@@ -157,6 +175,6 @@ int main(int argc, char **argv) {
         for (uint64_t off = 0; off < dmz_size(z);) { ssize_t r = dmz_pread(z, b, 1 << 20, off); if (r <= 0 || fwrite(b, 1, (size_t)r, stdout) != (size_t)r) die("cannot read %s", argv[2]); off += (uint64_t)r; }
         return 0;
     }
-    fprintf(stderr, "usage: dmz pack [-c log2] <in> <out> | dmz bundle [-c log2] <out> <dir> | dmz cat <in>\n");
+    fprintf(stderr, "usage: dmz pack [-c log2] [--payload <p>] <in> <out> | dmz decode <in> | dmz bundle [-c log2] <out> <dir> | dmz cat <in>\n");
     return 2;
 }

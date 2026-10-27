@@ -271,7 +271,7 @@ Allow about **40 GB free on the Mac** for game files, caches and packaging and
    [Homebrew](https://brew.sh/) if you don't already have it, then run:
 
    ```sh
-   brew install python xcodegen spirv-cross zstd
+   brew install python xcodegen spirv-cross zstd ffmpeg
    brew install --cask dotnet-sdk
    ```
 

@@ -2,6 +2,7 @@
 // (the original header, then 0xff before every 8 payload bytes), so a whole archive is never held decompressed.
 #include "dmz.h"
 #include <compression.h>
+#include "zstd.h"   // dm/third_party/zstd/lib: the decoder only
 #include <errno.h>
 #include <pthread.h>
 #include <stdlib.h>
@@ -12,7 +13,7 @@
 struct dmz {
     int fd; uint8_t view, log2; uint32_t n; uint64_t payload, size; uint8_t yaz0[16];
     uint64_t *off; uint8_t *codec;
-    pthread_mutex_t lock; int64_t cached; uint8_t *chunk, *in; void *scratch;   // the decoded chunk (index cached, -1 none), the compressed bytes read, LZFSE's work memory
+    pthread_mutex_t lock; int64_t cached; uint8_t *chunk, *in; void *scratch; ZSTD_DCtx *zd;   // the decoded chunk (index cached, -1 none), the compressed bytes read, LZFSE's work memory, zstd's context (made on first use)
 };
 
 static uint64_t le64(const uint8_t *p) { uint64_t v = 0; for (int i = 7; i >= 0; i--) v = v << 8 | p[i]; return v; }
@@ -53,9 +54,9 @@ dmz *dmz_open(int fd) {
     if (!z->off || !z->codec || full_pread(fd, z->off, table, DMZ_HEADER) || full_pread(fd, z->codec, codecs, (off_t)(DMZ_HEADER + table))) goto bad;
     for (uint32_t i = 0; i <= z->n; i++) z->off[i] = le64((uint8_t *)&z->off[i]);
     if (z->off[0] != data || z->off[z->n] != (uint64_t)st.st_size) { errno = EINVAL; goto bad; }
-    for (uint32_t i = 0; i < z->n; i++) {   // each chunk: stored at its full length, or compressed into fewer bytes (dm/tools/dmz.c stores a chunk LZFSE does not shrink)
+    for (uint32_t i = 0; i < z->n; i++) {   // each chunk: stored at its full length, or compressed into fewer bytes (dm/tools/dmz.c stores a chunk that does not shrink)
         uint64_t len = i + 1 < z->n ? chunk : z->payload - (uint64_t)i * chunk, c = z->off[i + 1] - z->off[i];
-        if (z->off[i + 1] < z->off[i] || (z->codec[i] == DMZ_STORED ? c != len : z->codec[i] != DMZ_LZFSE || !c || c >= len)) { errno = EINVAL; goto bad; }
+        if (z->off[i + 1] < z->off[i] || (z->codec[i] == DMZ_STORED ? c != len : (z->codec[i] != DMZ_LZFSE && z->codec[i] != DMZ_ZSTD) || !c || c >= len)) { errno = EINVAL; goto bad; }
     }
     z->chunk = malloc(chunk + 1); z->in = malloc(chunk); z->scratch = malloc(compression_decode_scratch_buffer_size(COMPRESSION_LZFSE));
     if (!z->chunk || !z->in || !z->scratch || pthread_mutex_init(&z->lock, NULL)) goto bad;
@@ -66,7 +67,7 @@ bad:
 uint64_t dmz_size(const dmz *z) { return z->size; }
 void dmz_close(dmz *z) {
     if (!z) return;
-    pthread_mutex_destroy(&z->lock); free(z->off); free(z->codec); free(z->chunk); free(z->in); free(z->scratch); free(z);
+    pthread_mutex_destroy(&z->lock); ZSTD_freeDCtx(z->zd); free(z->off); free(z->codec); free(z->chunk); free(z->in); free(z->scratch); free(z);
 }
 int64_t dmz_listed_size(int fd, int64_t st_size) {
     uint8_t h[DMZ_HEADER], view, log2; uint32_t n; uint64_t payload, size;
@@ -82,7 +83,11 @@ static int load(dmz *z, uint64_t i) {
     if (z->codec[i] == DMZ_STORED) { if (full_pread(z->fd, z->chunk, len, (off_t)z->off[i])) return -1; }
     else {   // one byte of room past the chunk: a stream that decodes to more than the chunk is as damaged as one that decodes to less
         if (full_pread(z->fd, z->in, c, (off_t)z->off[i])) return -1;
-        if (compression_decode_buffer(z->chunk, len + 1, z->in, c, z->scratch, COMPRESSION_LZFSE) != len) { errno = EIO; return -1; }
+        if (z->codec[i] == DMZ_ZSTD) {   // one zstd frame per chunk; its declared and actual size must both be the chunk's
+            if (!z->zd && !(z->zd = ZSTD_createDCtx())) { errno = ENOMEM; return -1; }
+            size_t r = ZSTD_decompressDCtx(z->zd, z->chunk, len + 1, z->in, c);
+            if (ZSTD_isError(r) || r != len) { errno = EIO; return -1; }
+        } else if (compression_decode_buffer(z->chunk, len + 1, z->in, c, z->scratch, COMPRESSION_LZFSE) != len) { errno = EIO; return -1; }
     }
     z->cached = (int64_t)i; return 0;
 }

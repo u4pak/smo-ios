@@ -31,6 +31,16 @@ gen/vpx/%.o: $(VPX)/%.c $(wildcard $(VPX)/config/*.h)
 	clang -O2 -g -I$(VPX) -I$(VPX)/config -c $< -o $@
 $(VPX_LIB): $(VPX_OBJ)
 	rm -f $@; ar rcs $@ $^
+# Third party: zstd's decoder only (lib/common and lib/decompress of zstd 1.5.7, unmodified), for the IPA's compressed RomFS (dmz.c). Built separately the same way
+ZSTD=../third_party/zstd/lib
+ZSTD_SRC=$(sort $(wildcard $(ZSTD)/common/*.c $(ZSTD)/decompress/*.c))
+ZSTD_OBJ=$(patsubst $(ZSTD)/%.c,gen/zstd/%.o,$(ZSTD_SRC))
+ZSTD_LIB=gen/zstd/libzstd_dec.a
+gen/zstd/%.o: $(ZSTD)/%.c $(wildcard $(ZSTD)/*.h $(ZSTD)/common/*.h $(ZSTD)/decompress/*.h)
+	@mkdir -p $(dir $@)
+	clang -O2 -g -DZSTD_LEGACY_SUPPORT=0 -DZSTD_DISABLE_ASM -c $< -o $@
+$(ZSTD_LIB): $(ZSTD_OBJ)
+	rm -f $@; ar rcs $@ $^
 .DEFAULT_GOAL := dmhost   # The header generation rules are written first below, so the default goal must be stated explicitly (otherwise make only generates the headers and does not build the host)
 .PHONY: game_profile
 game_profile: $(GAME_H)
@@ -43,5 +53,5 @@ $(GAME_STAMP): FORCE
 	@mkdir -p gen; echo $(GAME) | cmp -s - $@ || echo $(GAME) > $@
 .PHONY: FORCE
 FORCE:
-dmhost: $(SRC) $(GFX) dm.h dmz.h hle.h dm_input.h front.h $(GFX_H) $(GAME_H) $(GAME_DIR)/dmsh_chain.h $(GAME_STAMP) $(VPX_LIB)
-	clang $(CFLAGS) -I../gfx/nvn/include -I../third_party/vulkan-headers/include -I$(dir $(GAME_H)) -I$(GAME_DIR) -I$(VPX) -I../third_party/stb_vorbis -fobjc-arc -o $@ $(SRC) $(GFX) $(VPX_LIB) -framework Cocoa -framework QuartzCore -framework Metal -framework AudioToolbox -framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework IOSurface -framework ImageIO -framework UniformTypeIdentifiers -lcompression
+dmhost: $(SRC) $(GFX) dm.h dmz.h hle.h dm_input.h front.h $(GFX_H) $(GAME_H) $(GAME_DIR)/dmsh_chain.h $(GAME_STAMP) $(VPX_LIB) $(ZSTD_LIB)
+	clang $(CFLAGS) -I../gfx/nvn/include -I../third_party/vulkan-headers/include -I$(dir $(GAME_H)) -I$(GAME_DIR) -I$(VPX) -I$(ZSTD) -I../third_party/stb_vorbis -fobjc-arc -o $@ $(SRC) $(GFX) $(VPX_LIB) $(ZSTD_LIB) -framework Cocoa -framework QuartzCore -framework Metal -framework AudioToolbox -framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework IOSurface -framework ImageIO -framework UniformTypeIdentifiers -lcompression
